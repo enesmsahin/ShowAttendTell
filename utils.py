@@ -3,10 +3,14 @@ import numpy as np
 import h5py
 import json
 import torch
-from scipy.misc import imread, imresize
+# from scipy.misc import imread, imresize
+from imageio import imread
+from skimage.transform import resize as imresize
 from tqdm import tqdm
 from collections import Counter
 from random import seed, choice, sample
+
+from shutil import copy
 
 
 def create_input_files(dataset, karpathy_json_path, image_folder, captions_per_image, min_word_freq, output_folder,
@@ -100,6 +104,11 @@ def create_input_files(dataset, karpathy_json_path, image_folder, captions_per_i
             enc_captions = []
             caplens = []
 
+            # ***Copy images
+            outImgPath = os.path.join(output_folder, split.lower())
+            if not os.path.exists(outImgPath):
+                os.makedirs(outImgPath)
+
             for i, path in enumerate(tqdm(impaths)):
 
                 # Sample captions
@@ -120,6 +129,9 @@ def create_input_files(dataset, karpathy_json_path, image_folder, captions_per_i
                 img = img.transpose(2, 0, 1)
                 assert img.shape == (3, 256, 256)
                 assert np.max(img) <= 255
+
+                # ***Copy images
+                copy(impaths[i], outImgPath)
 
                 # Save image to HDF5 file
                 images[i] = img
