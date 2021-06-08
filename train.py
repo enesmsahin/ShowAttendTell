@@ -26,7 +26,7 @@ cudnn.benchmark = True  # set to true only if inputs to model are fixed size; ot
 start_epoch = 0
 epochs = 120  # number of epochs to train for (if early stopping is not triggered)
 epochs_since_improvement = 0  # keeps track of number of epochs since there's been an improvement in validation BLEU
-batch_size = 32
+batch_size = 128
 workers = 1  # for data-loading; right now, only 1 works with h5py
 encoder_lr = 1e-4  # learning rate for encoder if fine-tuning
 decoder_lr = 4e-4  # learning rate for decoder
@@ -35,7 +35,7 @@ alpha_c = 1.  # regularization parameter for 'doubly stochastic attention', as i
 best_bleu4 = 0.  # BLEU-4 score right now
 print_freq = 100  # print training/validation stats every __ batches
 fine_tune_encoder = False  # fine-tune encoder?
-checkpoint = "/media/enes/storage/OKUL/MMI727/PROJECT/a-PyTorch-Tutorial-to-Image-Captioning/coco_pretrained/BEST_checkpoint_coco_5_cap_per_img_5_min_word_freq.pth.tar"  # path to checkpoint, None if none
+checkpoint = None #"/media/enes/storage/OKUL/MMI727/PROJECT/a-PyTorch-Tutorial-to-Image-Captioning/coco_pretrained/BEST_checkpoint_coco_5_cap_per_img_5_min_word_freq.pth.tar"  # path to checkpoint, None if none
 
 def recursion_change_bn(module):
     if isinstance(module, torch.nn.BatchNorm2d):
@@ -281,9 +281,10 @@ def validate(val_loader, encoder, decoder, criterion):
 
             # Remove timesteps that we didn't decode at, or are pads
             # pack_padded_sequence is an easy trick to do this
+            # ***too many values to unpack error https://github.com/sgrvinod/a-PyTorch-Tutorial-to-Image-Captioning/issues/86
             scores_copy = scores.clone()
-            scores, _ = pack_padded_sequence(scores, decode_lengths, batch_first=True)
-            targets, _ = pack_padded_sequence(targets, decode_lengths, batch_first=True)
+            scores = pack_padded_sequence(scores, decode_lengths, batch_first=True).data
+            targets = pack_padded_sequence(targets, decode_lengths, batch_first=True).data
 
             # Calculate loss
             loss = criterion(scores, targets)

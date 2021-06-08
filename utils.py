@@ -211,6 +211,7 @@ def clip_gradient(optimizer, grad_clip):
     :param optimizer: optimizer with the gradients to be clipped
     :param grad_clip: clip value
     """
+    # ***TODO: this clipping strategy may be modified to clip only lstm weights
     for group in optimizer.param_groups:
         for param in group['params']:
             if param.grad is not None:
@@ -218,7 +219,7 @@ def clip_gradient(optimizer, grad_clip):
 
 
 def save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder, encoder_optimizer, decoder_optimizer,
-                    bleu4, is_best):
+                    bleu4, is_best, id):
     """
     Saves model checkpoint.
 
@@ -231,6 +232,7 @@ def save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder
     :param decoder_optimizer: optimizer to update decoder's weights
     :param bleu4: validation BLEU-4 score for this epoch
     :param is_best: is this checkpoint the best so far?
+    :param id: checkpoint id
     """
 
     """
@@ -252,7 +254,7 @@ def save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder
              'encoder_optimizer_state_dict': encoder_optimizer.state_dict() if encoder_optimizer is not None else None,
              'decoder_optimizer_state_dict': decoder_optimizer.state_dict() if decoder_optimizer is not None else None}
 
-    filename = 'checkpoint_' + data_name + '.pth.tar'
+    filename = 'checkpoint_' + str(id) + '_' + data_name + '.pth.tar'
     torch.save(state, filename)
     # If this checkpoint is the best so far, store a copy so it doesn't get overwritten by a worse checkpoint
     if is_best:
