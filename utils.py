@@ -105,9 +105,10 @@ def create_input_files(dataset, karpathy_json_path, image_folder, captions_per_i
             caplens = []
 
             # ***Copy images
-            outImgPath = os.path.join(output_folder, split.lower())
-            if not os.path.exists(outImgPath):
-                os.makedirs(outImgPath)
+            if split == 'VAL' or split == 'TEST':
+                outImgPath = os.path.join(output_folder, split.lower())
+                if not os.path.exists(outImgPath):
+                    os.makedirs(outImgPath)
 
             for i, path in enumerate(tqdm(impaths)):
 
@@ -131,7 +132,8 @@ def create_input_files(dataset, karpathy_json_path, image_folder, captions_per_i
                 assert np.max(img) <= 255
 
                 # ***Copy images
-                copy(impaths[i], outImgPath)
+                if split == 'VAL' or split == 'TEST':
+                    copy(impaths[i], outImgPath)
 
                 # Save image to HDF5 file
                 images[i] = img
