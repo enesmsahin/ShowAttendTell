@@ -2,6 +2,7 @@ import torch
 from torch import nn
 from torch.nn.modules import rnn
 import torchvision
+import torch.nn.functional as F
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -37,6 +38,139 @@ class Encoder(nn.Module):
         out = self.adaptive_pool(out)  # (batch_size, 2048, encoded_image_size, encoded_image_size)
         out = out.permute(0, 2, 3, 1)  # (batch_size, encoded_image_size, encoded_image_size, 2048)
         return out
+
+    def fine_tune(self, fine_tune=True):
+        """
+        Allow or prevent the computation of gradients for convolutional blocks 2 through 4 of the encoder.
+
+        :param fine_tune: Allow?
+        """
+        for p in self.resnet.parameters():
+            p.requires_grad = False
+        # If fine-tuning, only fine-tune convolutional blocks 2 through 4
+        for c in list(self.resnet.children())[5:]:
+            for p in c.parameters():
+                p.requires_grad = fine_tune
+
+
+class EncoderWide(nn.Module):
+    """
+    Encoder with wider feature map that uses output of conv4_x layer in the original ResNet paper.
+    """
+
+    def __init__(self, encoded_image_size=16):
+        super().__init__()
+        self.enc_image_size = encoded_image_size
+
+        resnet = torchvision.models.resnet101(pretrained=True)  # pretrained ImageNet ResNet-101
+
+        # Remove linear pool and last 3 bottleneck layers
+        modules = list(resnet.children())[:-3] # number of channels at the last layer is 1024
+
+        # Additional bottleneck layer which makes number of output channels 2048
+        self.bottleneck = nn.Sequential(
+            nn.Conv2d(1024, 512, kernel_size=(1, 1), stride=(1, 1), bias=False),
+            nn.BatchNorm2d(512),
+            nn.Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False),
+            nn.BatchNorm2d(512),
+            nn.Conv2d(512, 2048, kernel_size=(1, 1), stride=(1, 1), bias=False),
+            nn.BatchNorm2d(2048),
+            nn.ReLU(inplace=True)
+        )
+        modules.append(self.bottleneck)
+
+        self.resnet = nn.Sequential(*modules)
+
+        # Resize image to fixed size to allow input images of variable size
+        self.adaptive_pool = nn.AdaptiveAvgPool2d((encoded_image_size, encoded_image_size))
+
+        self.fine_tune()
+
+    def forward(self, images):
+        """
+        Forward propagation.
+
+        :param images: images, a tensor of dimensions (batch_size, 3, image_size, image_size)
+        :return: encoded images
+        """
+        out = self.resnet(images)  # (batch_size, 2048, image_size/16, image_size/16)
+        out = self.adaptive_pool(out)  # (batch_size, 2048, encoded_image_size, encoded_image_size)
+        out = out.permute(0, 2, 3, 1)  # (batch_size, encoded_image_size, encoded_image_size, 2048)
+        return out
+
+    def fine_tune(self, fine_tune=True):
+        """
+        Allow or prevent the computation of gradients for convolutional blocks 2 through 4 of the encoder.
+
+        :param fine_tune: Allow?
+        """
+        for p in self.resnet.parameters():
+            p.requires_grad = False
+        # If fine-tuning, only fine-tune convolutional blocks 2 through 4
+        for c in list(self.resnet.children())[5:]:
+            for p in c.parameters():
+                p.requires_grad = fine_tune
+
+class EncoderFPN(nn.Module):
+    """
+    Encoder with 3-level Feature Pyramid Network
+    """
+
+    def __init__(self, encoded_image_size=16):
+        super().__init__()
+        self.enc_image_size = encoded_image_size
+
+        resnet = torchvision.models.resnet101(pretrained=True)  # pretrained ImageNet ResNet-101
+
+        modules_conv3_x = list(resnet.children())[:-4] # This is output of conv3_x layer in the original paper. Number of channels at the last layer is 512. Spatial dimension is image_size / 8
+        self.resnet_conv3_x = nn.Sequential(*modules_conv3_x)
+
+        module_conv4_xResNet = list(resnet.children())[-4] # This is conv4_x layer in the original paper. Number of input channels is 512, number of output channels is 1024.
+        module_conv5_xResNet = list(resnet.children())[-3] # This is conv5_x layer in the original paper. Number of input channels is 1024, number of output channels is 2048.
+
+        self.conv4_xResNet = nn.Sequential(*module_conv4_xResNet)
+        self.conv5_xResNet = nn.Sequential(*module_conv5_xResNet)
+
+        self.c1_1x1 = nn.Conv2d(512, 256, kernel_size=(1, 1), stride=(1, 1))
+        self.c2_1x1 = nn.Conv2d(1024, 256, kernel_size=(1, 1), stride=(1, 1))
+        self.c3_1x1 = nn.Conv2d(2048, 256, kernel_size=(1, 1), stride=(1, 1))
+
+        # Resize image to fixed size to allow input images of variable size
+        self.adaptive_pool = nn.AdaptiveAvgPool2d((encoded_image_size, encoded_image_size))
+
+        self.fine_tune()
+
+    def forward(self, images):
+        """
+        Forward propagation.
+
+        :param images: images, a tensor of dimensions (batch_size, 3, image_size, image_size)
+        :return: encoded images
+        """
+        c1 = self.resnet_conv3_x(images)  # (batch_size, 512, image_size/8, image_size/8)
+        c2 = self.conv4_xResNet(c1) # (batch_size, 1024, image_size/16, image_size/16)
+        c3 = self.conv5_xResNet(c2) # (batch_size, 2048, image_size/32, image_size/32)
+
+        p3 = self.c3_1x1(c3) # (batch_size, 256, image_size/32, image_size/32)
+        p2 = self.upsample_add(self.c2_1x1(c2), p3) # (batch_size, 256, image_size/16, image_size/16)
+        p1 = self.upsample_add(self.c1_1x1(c1), p2) # (batch_size, 256, image_size/8, image_size/8)
+
+        """ ***LEFT HERE
+        USE P1 OUTPUT, MAKE IT image_size/16 and 2048 channel using bottleneck layers or make fpn 2-layer, remove conv3_x
+        """
+
+        out = self.adaptive_pool(out)  # (batch_size, 2048, encoded_image_size, encoded_image_size)
+        out = out.permute(0, 2, 3, 1)  # (batch_size, encoded_image_size, encoded_image_size, 2048)
+        return out
+
+    def upsample_add(self, c, p):
+        """
+        p: map to be upsampled
+        c: map to be added to upsampled p
+        """
+        n, c, h, w = c.shape
+        upsampled = F.upsample(p, size=(h, w), mode='bilinear')
+        return upsampled + c
 
     def fine_tune(self, fine_tune=True):
         """
@@ -268,506 +402,6 @@ class Decoder(nn.Module):
                 h = self.decode_step(torch.cat([embeddings[:batch_size_t, t, :], attention_weighted_encoding], dim=1), h[:batch_size_t])  # (batch_size_t, decoder_dim)
             else:
                 raise Exception("Cannot perform forward pass. rnnType should be one of \"LSTM\", \"GRU\"!")
-            preds = self.fc(self.dropout(h))  # (batch_size_t, vocab_size)
-            predictions[:batch_size_t, t, :] = preds
-            alphas[:batch_size_t, t, :] = alpha
-
-        return predictions, encoded_captions, decode_lengths, alphas, sort_ind
-
-class DecoderWithAttention(nn.Module):
-    """
-    Decoder.
-    """
-
-    def __init__(self, attention_dim, embed_dim, decoder_dim, vocab_size, encoder_dim=2048, dropout=0.5):
-        """
-        :param attention_dim: size of attention network
-        :param embed_dim: embedding size
-        :param decoder_dim: size of decoder's RNN
-        :param vocab_size: size of vocabulary
-        :param encoder_dim: feature size of encoded images
-        :param dropout: dropout
-        """
-        super().__init__()
-
-        self.encoder_dim = encoder_dim
-        self.attention_dim = attention_dim
-        self.embed_dim = embed_dim
-        self.decoder_dim = decoder_dim
-        self.vocab_size = vocab_size
-        self.dropout = dropout
-
-        self.attention = Attention(encoder_dim, decoder_dim, attention_dim)  # attention network
-
-        self.embedding = nn.Embedding(vocab_size, embed_dim)  # embedding layer
-        self.dropout = nn.Dropout(p=self.dropout)
-        self.decode_step = nn.LSTMCell(embed_dim + encoder_dim, decoder_dim, bias=True)  # decoding LSTMCell
-        self.init_h = nn.Linear(encoder_dim, decoder_dim)  # linear layer to find initial hidden state of LSTMCell
-        self.init_c = nn.Linear(encoder_dim, decoder_dim)  # linear layer to find initial cell state of LSTMCell
-        self.f_beta = nn.Linear(decoder_dim, encoder_dim)  # linear layer to create a sigmoid-activated gate
-        self.sigmoid = nn.Sigmoid()
-        self.fc = nn.Linear(decoder_dim, vocab_size)  # linear layer to find scores over vocabulary
-        self.init_weights()  # initialize some layers with the uniform distribution
-
-    def init_weights(self):
-        """
-        Initializes some parameters with values from the uniform distribution, for easier convergence.
-        """
-        self.embedding.weight.data.uniform_(-0.1, 0.1)
-        self.fc.bias.data.fill_(0)
-        self.fc.weight.data.uniform_(-0.1, 0.1)
-
-    def load_pretrained_embeddings(self, embeddings):
-        """
-        Loads embedding layer with pre-trained embeddings.
-
-        :param embeddings: pre-trained embeddings
-        """
-        self.embedding.weight = nn.Parameter(embeddings)
-
-    def fine_tune_embeddings(self, fine_tune=True):
-        """
-        Allow fine-tuning of embedding layer? (Only makes sense to not-allow if using pre-trained embeddings).
-
-        :param fine_tune: Allow?
-        """
-        for p in self.embedding.parameters():
-            p.requires_grad = fine_tune
-
-    def init_hidden_state(self, encoder_out):
-        """
-        Creates the initial hidden and cell states for the decoder's LSTM based on the encoded images.
-
-        :param encoder_out: encoded images, a tensor of dimension (batch_size, num_pixels, encoder_dim)
-        :return: hidden state, cell state
-        """
-        mean_encoder_out = encoder_out.mean(dim=1)
-        h = self.init_h(mean_encoder_out)  # (batch_size, decoder_dim)
-        c = self.init_c(mean_encoder_out)
-        return h, c
-
-    def forward(self, encoder_out, encoded_captions, caption_lengths):
-        """
-        Forward propagation.
-
-        :param encoder_out: encoded images, a tensor of dimension (batch_size, enc_image_size, enc_image_size, encoder_dim)
-        :param encoded_captions: encoded captions, a tensor of dimension (batch_size, max_caption_length)
-        :param caption_lengths: caption lengths, a tensor of dimension (batch_size, 1)
-        :return: scores for vocabulary, sorted encoded captions, decode lengths, weights, sort indices
-        """
-
-        batch_size = encoder_out.size(0)
-        encoder_dim = encoder_out.size(-1)
-        vocab_size = self.vocab_size
-
-        # Flatten image
-        encoder_out = encoder_out.view(batch_size, -1, encoder_dim)  # (batch_size, num_pixels, encoder_dim)
-        num_pixels = encoder_out.size(1)
-
-        # Sort input data by decreasing lengths; why? apparent below
-        caption_lengths, sort_ind = caption_lengths.squeeze(1).sort(dim=0, descending=True)
-        encoder_out = encoder_out[sort_ind]
-        encoded_captions = encoded_captions[sort_ind]
-
-        # Embedding
-        embeddings = self.embedding(encoded_captions)  # (batch_size, max_caption_length, embed_dim)
-
-        # Initialize LSTM state
-        h, c = self.init_hidden_state(encoder_out)  # (batch_size, decoder_dim)
-
-        # We won't decode at the <end> position, since we've finished generating as soon as we generate <end>
-        # So, decoding lengths are actual lengths - 1
-        decode_lengths = (caption_lengths - 1).tolist()
-
-        # Create tensors to hold word predicion scores and alphas
-        predictions = torch.zeros(batch_size, max(decode_lengths), vocab_size).to(device)
-        alphas = torch.zeros(batch_size, max(decode_lengths), num_pixels).to(device)
-
-        # At each time-step, decode by
-        # attention-weighing the encoder's output based on the decoder's previous hidden state output
-        # then generate a new word in the decoder with the previous word and the attention weighted encoding
-        for t in range(max(decode_lengths)):
-            batch_size_t = sum([l > t for l in decode_lengths])
-            attention_weighted_encoding, alpha = self.attention(encoder_out[:batch_size_t],
-                                                                h[:batch_size_t])
-            gate = self.sigmoid(self.f_beta(h[:batch_size_t]))  # gating scalar, (batch_size_t, encoder_dim)
-            attention_weighted_encoding = gate * attention_weighted_encoding
-            h, c = self.decode_step(
-                torch.cat([embeddings[:batch_size_t, t, :], attention_weighted_encoding], dim=1),
-                (h[:batch_size_t], c[:batch_size_t]))  # (batch_size_t, decoder_dim)
-            preds = self.fc(self.dropout(h))  # (batch_size_t, vocab_size)
-            predictions[:batch_size_t, t, :] = preds
-            alphas[:batch_size_t, t, :] = alpha
-
-        return predictions, encoded_captions, decode_lengths, alphas, sort_ind
-
-class DecoderWithConcatenatedAttention(nn.Module):
-    """
-    Decoder.
-    """
-
-    def __init__(self, attention_dim, embed_dim, decoder_dim, vocab_size, encoder_dim=2048, dropout=0.5):
-        """
-        :param attention_dim: size of attention network
-        :param embed_dim: embedding size
-        :param decoder_dim: size of decoder's RNN
-        :param vocab_size: size of vocabulary
-        :param encoder_dim: feature size of encoded images
-        :param dropout: dropout
-        """
-        super().__init__()
-
-        self.encoder_dim = encoder_dim
-        self.attention_dim = attention_dim
-        self.embed_dim = embed_dim
-        self.decoder_dim = decoder_dim
-        self.vocab_size = vocab_size
-        self.dropout = dropout
-
-        self.attention = ConcatenatedAttention(encoder_dim, decoder_dim, attention_dim)  # attention network
-
-        self.embedding = nn.Embedding(vocab_size, embed_dim)  # embedding layer
-        self.dropout = nn.Dropout(p=self.dropout)
-        self.decode_step = nn.LSTMCell(embed_dim + encoder_dim, decoder_dim, bias=True)  # decoding LSTMCell
-        self.init_h = nn.Linear(encoder_dim, decoder_dim)  # linear layer to find initial hidden state of LSTMCell
-        self.init_c = nn.Linear(encoder_dim, decoder_dim)  # linear layer to find initial cell state of LSTMCell
-        self.f_beta = nn.Linear(decoder_dim, encoder_dim)  # linear layer to create a sigmoid-activated gate
-        self.sigmoid = nn.Sigmoid()
-        self.fc = nn.Linear(decoder_dim, vocab_size)  # linear layer to find scores over vocabulary
-        self.init_weights()  # initialize some layers with the uniform distribution
-
-    def init_weights(self):
-        """
-        Initializes some parameters with values from the uniform distribution, for easier convergence.
-        """
-        self.embedding.weight.data.uniform_(-0.1, 0.1)
-        self.fc.bias.data.fill_(0)
-        self.fc.weight.data.uniform_(-0.1, 0.1)
-
-    def load_pretrained_embeddings(self, embeddings):
-        """
-        Loads embedding layer with pre-trained embeddings.
-
-        :param embeddings: pre-trained embeddings
-        """
-        self.embedding.weight = nn.Parameter(embeddings)
-
-    def fine_tune_embeddings(self, fine_tune=True):
-        """
-        Allow fine-tuning of embedding layer? (Only makes sense to not-allow if using pre-trained embeddings).
-
-        :param fine_tune: Allow?
-        """
-        for p in self.embedding.parameters():
-            p.requires_grad = fine_tune
-
-    def init_hidden_state(self, encoder_out):
-        """
-        Creates the initial hidden and cell states for the decoder's LSTM based on the encoded images.
-
-        :param encoder_out: encoded images, a tensor of dimension (batch_size, num_pixels, encoder_dim)
-        :return: hidden state, cell state
-        """
-        mean_encoder_out = encoder_out.mean(dim=1)
-        h = self.init_h(mean_encoder_out)  # (batch_size, decoder_dim)
-        c = self.init_c(mean_encoder_out)
-        return h, c
-
-    def forward(self, encoder_out, encoded_captions, caption_lengths):
-        """
-        Forward propagation.
-
-        :param encoder_out: encoded images, a tensor of dimension (batch_size, enc_image_size, enc_image_size, encoder_dim)
-        :param encoded_captions: encoded captions, a tensor of dimension (batch_size, max_caption_length)
-        :param caption_lengths: caption lengths, a tensor of dimension (batch_size, 1)
-        :return: scores for vocabulary, sorted encoded captions, decode lengths, weights, sort indices
-        """
-
-        batch_size = encoder_out.size(0)
-        encoder_dim = encoder_out.size(-1)
-        vocab_size = self.vocab_size
-
-        # Flatten image
-        encoder_out = encoder_out.view(batch_size, -1, encoder_dim)  # (batch_size, num_pixels, encoder_dim)
-        num_pixels = encoder_out.size(1)
-
-        # Sort input data by decreasing lengths; why? apparent below
-        caption_lengths, sort_ind = caption_lengths.squeeze(1).sort(dim=0, descending=True)
-        encoder_out = encoder_out[sort_ind]
-        encoded_captions = encoded_captions[sort_ind]
-
-        # Embedding
-        embeddings = self.embedding(encoded_captions)  # (batch_size, max_caption_length, embed_dim)
-
-        # Initialize LSTM state
-        h, c = self.init_hidden_state(encoder_out)  # (batch_size, decoder_dim)
-
-        # We won't decode at the <end> position, since we've finished generating as soon as we generate <end>
-        # So, decoding lengths are actual lengths - 1
-        decode_lengths = (caption_lengths - 1).tolist()
-
-        # Create tensors to hold word predicion scores and alphas
-        predictions = torch.zeros(batch_size, max(decode_lengths), vocab_size).to(device)
-        alphas = torch.zeros(batch_size, max(decode_lengths), num_pixels).to(device)
-
-        # At each time-step, decode by
-        # attention-weighing the encoder's output based on the decoder's previous hidden state output
-        # then generate a new word in the decoder with the previous word and the attention weighted encoding
-        for t in range(max(decode_lengths)):
-            batch_size_t = sum([l > t for l in decode_lengths])
-            attention_weighted_encoding, alpha = self.attention(encoder_out[:batch_size_t],
-                                                                h[:batch_size_t])
-            gate = self.sigmoid(self.f_beta(h[:batch_size_t]))  # gating scalar, (batch_size_t, encoder_dim)
-            attention_weighted_encoding = gate * attention_weighted_encoding
-            h, c = self.decode_step(
-                torch.cat([embeddings[:batch_size_t, t, :], attention_weighted_encoding], dim=1),
-                (h[:batch_size_t], c[:batch_size_t]))  # (batch_size_t, decoder_dim)
-            preds = self.fc(self.dropout(h))  # (batch_size_t, vocab_size)
-            predictions[:batch_size_t, t, :] = preds
-            alphas[:batch_size_t, t, :] = alpha
-
-        return predictions, encoded_captions, decode_lengths, alphas, sort_ind
-
-class GRUDecoderWithAttention(nn.Module):
-    """
-    GRUDecoder.
-    """
-
-    def __init__(self, attention_dim, embed_dim, decoder_dim, vocab_size, encoder_dim=2048, dropout=0.5):
-        """
-        :param attention_dim: size of attention network
-        :param embed_dim: embedding size
-        :param decoder_dim: size of decoder's RNN
-        :param vocab_size: size of vocabulary
-        :param encoder_dim: feature size of encoded images
-        :param dropout: dropout
-        """
-        super().__init__()
-
-        self.encoder_dim = encoder_dim
-        self.attention_dim = attention_dim
-        self.embed_dim = embed_dim
-        self.decoder_dim = decoder_dim
-        self.vocab_size = vocab_size
-        self.dropout = dropout
-
-        self.attention = Attention(encoder_dim, decoder_dim, attention_dim)  # attention network
-
-        self.embedding = nn.Embedding(vocab_size, embed_dim)  # embedding layer
-        self.dropout = nn.Dropout(p=self.dropout)
-        self.decode_step = nn.GRUCell(embed_dim + encoder_dim, decoder_dim, bias=True)  # decoding GRUCell
-        self.init_h = nn.Linear(encoder_dim, decoder_dim)  # linear layer to find initial hidden state of GRUCell
-        self.f_beta = nn.Linear(decoder_dim, encoder_dim)  # linear layer to create a sigmoid-activated gate
-        self.sigmoid = nn.Sigmoid()
-        self.fc = nn.Linear(decoder_dim, vocab_size)  # linear layer to find scores over vocabulary
-        self.init_weights()  # initialize some layers with the uniform distribution
-
-    def init_weights(self):
-        """
-        Initializes some parameters with values from the uniform distribution, for easier convergence.
-        """
-        self.embedding.weight.data.uniform_(-0.1, 0.1)
-        self.fc.bias.data.fill_(0)
-        self.fc.weight.data.uniform_(-0.1, 0.1)
-
-    def load_pretrained_embeddings(self, embeddings):
-        """
-        Loads embedding layer with pre-trained embeddings.
-
-        :param embeddings: pre-trained embeddings
-        """
-        self.embedding.weight = nn.Parameter(embeddings)
-
-    def fine_tune_embeddings(self, fine_tune=True):
-        """
-        Allow fine-tuning of embedding layer? (Only makes sense to not-allow if using pre-trained embeddings).
-
-        :param fine_tune: Allow?
-        """
-        for p in self.embedding.parameters():
-            p.requires_grad = fine_tune
-
-    def init_hidden_state(self, encoder_out):
-        """
-        Creates the initial hidden state for the decoder's GRU based on the encoded images.
-
-        :param encoder_out: encoded images, a tensor of dimension (batch_size, num_pixels, encoder_dim)
-        :return: hidden state, cell state
-        """
-        mean_encoder_out = encoder_out.mean(dim=1)
-        h = self.init_h(mean_encoder_out)  # (batch_size, decoder_dim)
-        return h
-
-    def forward(self, encoder_out, encoded_captions, caption_lengths):
-        """
-        Forward propagation.
-
-        :param encoder_out: encoded images, a tensor of dimension (batch_size, enc_image_size, enc_image_size, encoder_dim)
-        :param encoded_captions: encoded captions, a tensor of dimension (batch_size, max_caption_length)
-        :param caption_lengths: caption lengths, a tensor of dimension (batch_size, 1)
-        :return: scores for vocabulary, sorted encoded captions, decode lengths, weights, sort indices
-        """
-
-        batch_size = encoder_out.size(0)
-        encoder_dim = encoder_out.size(-1)
-        vocab_size = self.vocab_size
-
-        # Flatten image
-        encoder_out = encoder_out.view(batch_size, -1, encoder_dim)  # (batch_size, num_pixels, encoder_dim)
-        num_pixels = encoder_out.size(1)
-
-        # Sort input data by decreasing lengths; why? apparent below
-        caption_lengths, sort_ind = caption_lengths.squeeze(1).sort(dim=0, descending=True)
-        encoder_out = encoder_out[sort_ind]
-        encoded_captions = encoded_captions[sort_ind]
-
-        # Embedding
-        embeddings = self.embedding(encoded_captions)  # (batch_size, max_caption_length, embed_dim)
-
-        # Initialize GRU state
-        h = self.init_hidden_state(encoder_out)  # (batch_size, decoder_dim)
-
-        # We won't decode at the <end> position, since we've finished generating as soon as we generate <end>
-        # So, decoding lengths are actual lengths - 1
-        decode_lengths = (caption_lengths - 1).tolist()
-
-        # Create tensors to hold word predicion scores and alphas
-        predictions = torch.zeros(batch_size, max(decode_lengths), vocab_size).to(device)
-        alphas = torch.zeros(batch_size, max(decode_lengths), num_pixels).to(device)
-
-        # At each time-step, decode by
-        # attention-weighing the encoder's output based on the decoder's previous hidden state output
-        # then generate a new word in the decoder with the previous word and the attention weighted encoding
-        for t in range(max(decode_lengths)):
-            batch_size_t = sum([l > t for l in decode_lengths])
-            attention_weighted_encoding, alpha = self.attention(encoder_out[:batch_size_t],
-                                                                h[:batch_size_t])
-            gate = self.sigmoid(self.f_beta(h[:batch_size_t]))  # gating scalar, (batch_size_t, encoder_dim)
-            attention_weighted_encoding = gate * attention_weighted_encoding
-            h = self.decode_step(torch.cat([embeddings[:batch_size_t, t, :], attention_weighted_encoding], dim=1), h[:batch_size_t])  # (batch_size_t, decoder_dim)
-            preds = self.fc(self.dropout(h))  # (batch_size_t, vocab_size)
-            predictions[:batch_size_t, t, :] = preds
-            alphas[:batch_size_t, t, :] = alpha
-
-        return predictions, encoded_captions, decode_lengths, alphas, sort_ind
-
-class GRUDecoderWithConcatenatedAttention(nn.Module):
-    """
-    GRUDecoder.
-    """
-
-    def __init__(self, attention_dim, embed_dim, decoder_dim, vocab_size, encoder_dim=2048, dropout=0.5):
-        """
-        :param attention_dim: size of attention network
-        :param embed_dim: embedding size
-        :param decoder_dim: size of decoder's RNN
-        :param vocab_size: size of vocabulary
-        :param encoder_dim: feature size of encoded images
-        :param dropout: dropout
-        """
-        super().__init__()
-
-        self.encoder_dim = encoder_dim
-        self.attention_dim = attention_dim
-        self.embed_dim = embed_dim
-        self.decoder_dim = decoder_dim
-        self.vocab_size = vocab_size
-        self.dropout = dropout
-
-        self.attention = ConcatenatedAttention(encoder_dim, decoder_dim, attention_dim)  # attention network
-
-        self.embedding = nn.Embedding(vocab_size, embed_dim)  # embedding layer
-        self.dropout = nn.Dropout(p=self.dropout)
-        self.decode_step = nn.GRUCell(embed_dim + encoder_dim, decoder_dim, bias=True)  # decoding GRUCell
-        self.init_h = nn.Linear(encoder_dim, decoder_dim)  # linear layer to find initial hidden state of GRUCell
-        self.f_beta = nn.Linear(decoder_dim, encoder_dim)  # linear layer to create a sigmoid-activated gate
-        self.sigmoid = nn.Sigmoid()
-        self.fc = nn.Linear(decoder_dim, vocab_size)  # linear layer to find scores over vocabulary
-        self.init_weights()  # initialize some layers with the uniform distribution
-
-    def init_weights(self):
-        """
-        Initializes some parameters with values from the uniform distribution, for easier convergence.
-        """
-        self.embedding.weight.data.uniform_(-0.1, 0.1)
-        self.fc.bias.data.fill_(0)
-        self.fc.weight.data.uniform_(-0.1, 0.1)
-
-    def load_pretrained_embeddings(self, embeddings):
-        """
-        Loads embedding layer with pre-trained embeddings.
-
-        :param embeddings: pre-trained embeddings
-        """
-        self.embedding.weight = nn.Parameter(embeddings)
-
-    def fine_tune_embeddings(self, fine_tune=True):
-        """
-        Allow fine-tuning of embedding layer? (Only makes sense to not-allow if using pre-trained embeddings).
-
-        :param fine_tune: Allow?
-        """
-        for p in self.embedding.parameters():
-            p.requires_grad = fine_tune
-
-    def init_hidden_state(self, encoder_out):
-        """
-        Creates the initial hidden state for the decoder's GRU based on the encoded images.
-
-        :param encoder_out: encoded images, a tensor of dimension (batch_size, num_pixels, encoder_dim)
-        :return: hidden state, cell state
-        """
-        mean_encoder_out = encoder_out.mean(dim=1)
-        h = self.init_h(mean_encoder_out)  # (batch_size, decoder_dim)
-        return h
-
-    def forward(self, encoder_out, encoded_captions, caption_lengths):
-        """
-        Forward propagation.
-
-        :param encoder_out: encoded images, a tensor of dimension (batch_size, enc_image_size, enc_image_size, encoder_dim)
-        :param encoded_captions: encoded captions, a tensor of dimension (batch_size, max_caption_length)
-        :param caption_lengths: caption lengths, a tensor of dimension (batch_size, 1)
-        :return: scores for vocabulary, sorted encoded captions, decode lengths, weights, sort indices
-        """
-
-        batch_size = encoder_out.size(0)
-        encoder_dim = encoder_out.size(-1)
-        vocab_size = self.vocab_size
-
-        # Flatten image
-        encoder_out = encoder_out.view(batch_size, -1, encoder_dim)  # (batch_size, num_pixels, encoder_dim)
-        num_pixels = encoder_out.size(1)
-
-        # Sort input data by decreasing lengths; why? apparent below
-        caption_lengths, sort_ind = caption_lengths.squeeze(1).sort(dim=0, descending=True)
-        encoder_out = encoder_out[sort_ind]
-        encoded_captions = encoded_captions[sort_ind]
-
-        # Embedding
-        embeddings = self.embedding(encoded_captions)  # (batch_size, max_caption_length, embed_dim)
-
-        # Initialize GRU state
-        h = self.init_hidden_state(encoder_out)  # (batch_size, decoder_dim)
-
-        # We won't decode at the <end> position, since we've finished generating as soon as we generate <end>
-        # So, decoding lengths are actual lengths - 1
-        decode_lengths = (caption_lengths - 1).tolist()
-
-        # Create tensors to hold word predicion scores and alphas
-        predictions = torch.zeros(batch_size, max(decode_lengths), vocab_size).to(device)
-        alphas = torch.zeros(batch_size, max(decode_lengths), num_pixels).to(device)
-
-        # At each time-step, decode by
-        # attention-weighing the encoder's output based on the decoder's previous hidden state output
-        # then generate a new word in the decoder with the previous word and the attention weighted encoding
-        for t in range(max(decode_lengths)):
-            batch_size_t = sum([l > t for l in decode_lengths])
-            attention_weighted_encoding, alpha = self.attention(encoder_out[:batch_size_t],
-                                                                h[:batch_size_t])
-            gate = self.sigmoid(self.f_beta(h[:batch_size_t]))  # gating scalar, (batch_size_t, encoder_dim)
-            attention_weighted_encoding = gate * attention_weighted_encoding
-            h = self.decode_step(torch.cat([embeddings[:batch_size_t, t, :], attention_weighted_encoding], dim=1), h[:batch_size_t])  # (batch_size_t, decoder_dim)
             preds = self.fc(self.dropout(h))  # (batch_size_t, vocab_size)
             predictions[:batch_size_t, t, :] = preds
             alphas[:batch_size_t, t, :] = alpha
