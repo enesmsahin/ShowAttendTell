@@ -7,8 +7,14 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import skimage.transform
 import argparse
-from scipy.misc import imread, imresize
+# from scipy.misc import imread, imresize
 from PIL import Image
+from models import Encoder, Decoder
+import os
+from imageio import imread
+from PIL import Image
+
+
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -33,7 +39,8 @@ def caption_image_beam_search(encoder, decoder, image_path, word_map, beam_size=
     if len(img.shape) == 2:
         img = img[:, :, np.newaxis]
         img = np.concatenate([img, img, img], axis=2)
-    img = imresize(img, (256, 256))
+    # img = imresize(img, (256, 256))
+    img = np.array(Image.fromarray(img).resize((256,256), resample=Image.BILINEAR))
     img = img.transpose(2, 0, 1)
     img = img / 255.
     img = torch.FloatTensor(img).to(device)
@@ -108,8 +115,8 @@ def caption_image_beam_search(encoder, decoder, image_path, word_map, beam_size=
         next_word_inds = top_k_words % vocab_size  # (s)
 
         # Add new words to sequences, alphas
-        seqs = torch.cat([seqs[prev_word_inds], next_word_inds.unsqueeze(1)], dim=1)  # (s, step+1)
-        seqs_alpha = torch.cat([seqs_alpha[prev_word_inds], alpha[prev_word_inds].unsqueeze(1)],
+        seqs = torch.cat([seqs[prev_word_inds.long()], next_word_inds.unsqueeze(1)], dim=1)  # (s, step+1)
+        seqs_alpha = torch.cat([seqs_alpha[prev_word_inds.long()], alpha[prev_word_inds.long()].unsqueeze(1)],
                                dim=1)  # (s, step+1, enc_image_size, enc_image_size)
 
         # Which sequences are incomplete (didn't reach <end>)?
@@ -129,9 +136,9 @@ def caption_image_beam_search(encoder, decoder, image_path, word_map, beam_size=
             break
         seqs = seqs[incomplete_inds]
         seqs_alpha = seqs_alpha[incomplete_inds]
-        h = h[prev_word_inds[incomplete_inds]]
-        c = c[prev_word_inds[incomplete_inds]]
-        encoder_out = encoder_out[prev_word_inds[incomplete_inds]]
+        h = h[prev_word_inds[incomplete_inds].long()]
+        c = c[prev_word_inds[incomplete_inds].long()]
+        encoder_out = encoder_out[prev_word_inds[incomplete_inds].long()]
         top_k_scores = top_k_scores[incomplete_inds].unsqueeze(1)
         k_prev_words = next_word_inds[incomplete_inds].unsqueeze(1)
 
@@ -196,18 +203,32 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
+    # Read word map
+    with open(args.word_map, 'r') as j:
+        word_map = json.load(j)
+
     # Load model
+    encoder = Encoder()
+    decoder = Decoder(attention_dim=512,
+                    embed_dim=512,
+                    decoder_dim=512,
+                    vocab_size=len(word_map),
+                    dropout=0.5)
+
     checkpoint = torch.load(args.model, map_location=str(device))
-    decoder = checkpoint['decoder']
+
+    decoder_state_dict = checkpoint['decoder_state_dict']
+    encoder_state_dict = checkpoint['encoder_state_dict']
+
+    encoder.load_state_dict(encoder_state_dict)
+    decoder.load_state_dict(decoder_state_dict)
+
     decoder = decoder.to(device)
     decoder.eval()
-    encoder = checkpoint['encoder']
     encoder = encoder.to(device)
     encoder.eval()
 
     # Load word map (word2ix)
-    with open(args.word_map, 'r') as j:
-        word_map = json.load(j)
     rev_word_map = {v: k for k, v in word_map.items()}  # ix2word
 
     # Encode, decode with attention and beam search

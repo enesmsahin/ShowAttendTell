@@ -86,6 +86,8 @@ class EncoderWide(nn.Module):
 
         self.fine_tune()
 
+        # ***TODO: Make fine_tune(true) for this encoder in train.py
+
     def forward(self, images):
         """
         Forward propagation.
@@ -100,13 +102,13 @@ class EncoderWide(nn.Module):
 
     def fine_tune(self, fine_tune=True):
         """
-        Allow or prevent the computation of gradients for convolutional blocks 2 through 4 of the encoder.
+        Allow or prevent the computation of gradients for convolutional blocks after conv2_x block
 
         :param fine_tune: Allow?
         """
         for p in self.resnet.parameters():
             p.requires_grad = False
-        # If fine-tuning, only fine-tune convolutional blocks 2 through 4
+        # If fine-tuning, only fine-tune convolutional blocks after conv2_x block
         for c in list(self.resnet.children())[5:]:
             for p in c.parameters():
                 p.requires_grad = fine_tune
@@ -122,23 +124,21 @@ class EncoderFPN(nn.Module):
 
         resnet = torchvision.models.resnet101(pretrained=True)  # pretrained ImageNet ResNet-101
 
-        modules_conv3_x = list(resnet.children())[:-4] # This is output of conv3_x layer in the original paper. Number of channels at the last layer is 512. Spatial dimension is image_size / 8
-        self.resnet_conv3_x = nn.Sequential(*modules_conv3_x)
+        modules_conv4_x = list(resnet.children())[:-3] # This is output of conv4_x layer in the original paper. Number of channels at the last layer is 1024. Spatial dimension is image_size / 16
+        self.resnet_conv4_x = nn.Sequential(*modules_conv4_x)
 
-        module_conv4_xResNet = list(resnet.children())[-4] # This is conv4_x layer in the original paper. Number of input channels is 512, number of output channels is 1024.
         module_conv5_xResNet = list(resnet.children())[-3] # This is conv5_x layer in the original paper. Number of input channels is 1024, number of output channels is 2048.
 
-        self.conv4_xResNet = nn.Sequential(*module_conv4_xResNet)
         self.conv5_xResNet = nn.Sequential(*module_conv5_xResNet)
 
-        self.c1_1x1 = nn.Conv2d(512, 256, kernel_size=(1, 1), stride=(1, 1))
-        self.c2_1x1 = nn.Conv2d(1024, 256, kernel_size=(1, 1), stride=(1, 1))
-        self.c3_1x1 = nn.Conv2d(2048, 256, kernel_size=(1, 1), stride=(1, 1))
+        self.c1_1x1 = nn.Conv2d(1024, 2048, kernel_size=(1, 1), stride=(1, 1))
 
         # Resize image to fixed size to allow input images of variable size
         self.adaptive_pool = nn.AdaptiveAvgPool2d((encoded_image_size, encoded_image_size))
 
         self.fine_tune()
+
+        # ***TODO: Make fine_tune(true) for this encoder in train.py
 
     def forward(self, images):
         """
@@ -147,19 +147,13 @@ class EncoderFPN(nn.Module):
         :param images: images, a tensor of dimensions (batch_size, 3, image_size, image_size)
         :return: encoded images
         """
-        c1 = self.resnet_conv3_x(images)  # (batch_size, 512, image_size/8, image_size/8)
-        c2 = self.conv4_xResNet(c1) # (batch_size, 1024, image_size/16, image_size/16)
-        c3 = self.conv5_xResNet(c2) # (batch_size, 2048, image_size/32, image_size/32)
+        c1 = self.resnet_conv4_x(images)  # (batch_size, 1024, image_size/16, image_size/16)
+        c2 = self.conv5_xResNet(c1) # (batch_size, 2048, image_size/32, image_size/32)
 
-        p3 = self.c3_1x1(c3) # (batch_size, 256, image_size/32, image_size/32)
-        p2 = self.upsample_add(self.c2_1x1(c2), p3) # (batch_size, 256, image_size/16, image_size/16)
-        p1 = self.upsample_add(self.c1_1x1(c1), p2) # (batch_size, 256, image_size/8, image_size/8)
+        p2 = c2 # (batch_size, 2048, image_size/32, image_size/32)
+        p1 = self.upsample_add(self.c1_1x1(c1), p2) # (batch_size, 2048, image_size/16, image_size/16)
 
-        """ ***LEFT HERE
-        USE P1 OUTPUT, MAKE IT image_size/16 and 2048 channel using bottleneck layers or make fpn 2-layer, remove conv3_x
-        """
-
-        out = self.adaptive_pool(out)  # (batch_size, 2048, encoded_image_size, encoded_image_size)
+        out = self.adaptive_pool(p1)  # (batch_size, 2048, encoded_image_size, encoded_image_size)
         out = out.permute(0, 2, 3, 1)  # (batch_size, encoded_image_size, encoded_image_size, 2048)
         return out
 
@@ -174,13 +168,13 @@ class EncoderFPN(nn.Module):
 
     def fine_tune(self, fine_tune=True):
         """
-        Allow or prevent the computation of gradients for convolutional blocks 2 through 4 of the encoder.
+        Allow or prevent the computation of gradients for convolutional blocks after conv2_x block
 
         :param fine_tune: Allow?
         """
         for p in self.resnet.parameters():
             p.requires_grad = False
-        # If fine-tuning, only fine-tune convolutional blocks 2 through 4
+        # If fine-tuning, only fine-tune convolutional blocks after conv2_x block
         for c in list(self.resnet.children())[5:]:
             for p in c.parameters():
                 p.requires_grad = fine_tune
