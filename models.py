@@ -12,7 +12,7 @@ class Encoder(nn.Module):
     Encoder.
     """
 
-    def __init__(self, encoded_image_size=14):
+    def __init__(self, encoded_image_size=16):
         super().__init__()
         self.enc_image_size = encoded_image_size
 
@@ -254,7 +254,7 @@ class Decoder(nn.Module):
     """
     Generic Decoder Class
     """
-    def __init__(self, attention_dim, embed_dim, decoder_dim, vocab_size, encoder_dim=2048, dropout=0.5, attentionType="default", rnnType="LSTM"):
+    def __init__(self, attention_dim, embed_dim, decoder_dim, vocab_size, encoder_dim=2048, dropout=0.5, decoderType="LSTM", attentionType="default"):
         """
         @param attention_dim: size of attention network
         @param embed_dim: embedding size
@@ -274,7 +274,7 @@ class Decoder(nn.Module):
         self.vocab_size = vocab_size
         self.dropout = dropout
         self.attentionType = attentionType
-        self.rnnType = rnnType
+        self.decoderType = decoderType
 
         self.attention = None
         if attentionType == "default":
@@ -290,13 +290,13 @@ class Decoder(nn.Module):
         self.decode_step = None
         self.init_h = None
         self.init_c = None
-        if rnnType == "LSTM":
+        if self.decoderType == "LSTM":
             self.decode_step = nn.LSTMCell(embed_dim + encoder_dim, decoder_dim, bias=True)
             self.init_c = nn.Linear(encoder_dim, decoder_dim)  # linear layer to find initial cell state of LSTMCell
-        elif rnnType == "GRU":
+        elif self.decoderType == "GRU":
             self.decode_step = nn.GRUCell(embed_dim + encoder_dim, decoder_dim, bias=True)
         else:
-            raise Exception("rnnType must be one of: \"LSTM\", \"GRU\".")
+            raise Exception("decoderType must be one of: \"LSTM\", \"GRU\".")
 
         self.init_h = nn.Linear(encoder_dim, decoder_dim)  # linear layer to find initial hidden state of RNN
         
@@ -339,7 +339,7 @@ class Decoder(nn.Module):
         """
         mean_encoder_out = encoder_out.mean(dim=1)
         h = self.init_h(mean_encoder_out)  # (batch_size, decoder_dim)
-        c = self.init_c(mean_encoder_out) if self.rnnType == "LSTM" else None
+        c = self.init_c(mean_encoder_out) if self.decoderType == "LSTM" else None
         return h, c
 
     def forward(self, encoder_out, encoded_captions, caption_lengths):
@@ -388,11 +388,11 @@ class Decoder(nn.Module):
                                                                 h[:batch_size_t])
             gate = self.sigmoid(self.f_beta(h[:batch_size_t]))  # gating scalar, (batch_size_t, encoder_dim)
             attention_weighted_encoding = gate * attention_weighted_encoding
-            if self.rnnType == "LSTM":
+            if self.decoderType == "LSTM":
                 h, c = self.decode_step(
                     torch.cat([embeddings[:batch_size_t, t, :], attention_weighted_encoding], dim=1),
                     (h[:batch_size_t], c[:batch_size_t]))  # (batch_size_t, decoder_dim)
-            elif self.rnnType == "GRU":
+            elif self.decoderType == "GRU":
                 h = self.decode_step(torch.cat([embeddings[:batch_size_t, t, :], attention_weighted_encoding], dim=1), h[:batch_size_t])  # (batch_size_t, decoder_dim)
             else:
                 raise Exception("Cannot perform forward pass. rnnType should be one of \"LSTM\", \"GRU\"!")

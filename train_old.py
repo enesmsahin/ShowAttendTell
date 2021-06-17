@@ -5,106 +5,126 @@ import torch.utils.data
 import torchvision.transforms as transforms
 from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence
-from models import Encoder, EncoderWide, EncoderFPN, Decoder
+from models import Encoder, DecoderWithAttention
 from datasets import *
 from utils import *
 from nltk.translate.bleu_score import corpus_bleu
-import yaml
-
 
 # Data parameters
-img_data_folder = '/home/deepuser/deepnas/DISK4/DISK4/enes/mmi727_project/coco/images'  # folder with data files saved by create_input_files.py
-img_data_name = 'coco_5_cap_per_img_5_min_word_freq'  # base name shared by data files
+data_folder = '/home/deepuser/deepnas/DISK4/DISK4/enes/mmi727_project/coco/images'  # folder with data files saved by create_input_files.py
+data_name = 'coco_5_cap_per_img_5_min_word_freq'  # base name shared by data files
 
-config_path = "config.yaml" # path to config file
-
-cfgData = None
-with open("config.yaml", "r") as cfgFile:
-        cfgData = yaml.safe_load(cfgFile)
-
+# Model parameters
+emb_dim = 512  # dimension of word embeddings
+attention_dim = 512  # dimension of attention linear layers
+decoder_dim = 512  # dimension of decoder RNN
+dropout = 0.5
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # sets device for model and PyTorch tensors
 cudnn.benchmark = True  # set to true only if inputs to model are fixed size; otherwise lot of computational overhead
 
-print_freq = 100  # print training/validation stats every __ batches
+# Training parameters
 start_epoch = 0
-epochs_since_improvement = 0 # keeps track of number of epochs since there's been an improvement in validation BLEU
-best_bleu4 = 0. # Best BLEU-4 score until now
+epochs = 120  # number of epochs to train for (if early stopping is not triggered)
+epochs_since_improvement = 0  # keeps track of number of epochs since there's been an improvement in validation BLEU
+batch_size = 128
+workers = 1  # for data-loading; right now, only 1 works with h5py
+# encoder_lr = 1e-4  # learning rate for encoder if fine-tuning
+# decoder_lr = 4e-4  # learning rate for decoder
 
-modelTypes = cfgData["Model Type"]
-modelParams = cfgData["Model Parameters"]
-trainParams = cfgData["Training Parameters"]
+encoder_lr = 1e-3  # learning rate for encoder if fine-tuning
+decoder_lr = 1e-3  # learning rate for decoder
+
+grad_clip = 5.  # clip gradients at an absolute value of
+alpha_c = 1.  # regularization parameter for 'doubly stochastic attention', as in the paper
+best_bleu4 = 0.  # BLEU-4 score right now
+print_freq = 100  # print training/validation stats every __ batches
+fine_tune_encoder = False  # fine-tune encoder?
+checkpoint = None #"/media/enes/storage/OKUL/MMI727/PROJECT/a-PyTorch-Tutorial-to-Image-Captioning/coco_pretrained/BEST_checkpoint_coco_5_cap_per_img_5_min_word_freq.pth.tar"  # path to checkpoint, None if none
+
+def recursion_change_bn(module):
+    if isinstance(module, torch.nn.BatchNorm2d):
+        module.num_batches_tracked = 1
+    else:
+        for i, (name, module1) in enumerate(module._modules.items()):
+            module1 = recursion_change_bn(module1)
+    return module
 
 def main():
     """
     Training and validation.
     """
 
-    global best_bleu4, epochs_since_improvement, start_epoch, img_data_name, word_map
+    global best_bleu4, epochs_since_improvement, checkpoint, start_epoch, fine_tune_encoder, data_name, word_map
 
     # Read word map
-    word_map_file = os.path.join(img_data_folder, 'WORDMAP_' + img_data_name + '.json')
+    word_map_file = os.path.join(data_folder, 'WORDMAP_' + data_name + '.json')
     with open(word_map_file, 'r') as j:
         word_map = json.load(j)
 
-    # ***TODO: set fine_tune for necessary encoders
-    encoder = None
-    encoderType = modelTypes["Encoder"]
-    endodedImageSize = modelParams["encoded_image_size"]
-    if encoderType == "default":
-        encoder = Encoder(endodedImageSize)
-    elif encoderType == "wide":
-        encoder = EncoderWide(endodedImageSize)
-    elif encoderType == "fpn":
-        encoder = EncoderFPN(endodedImageSize)
-    else:
-        raise Exception("Encoder Type must be one of \"default\", \"wide\", \"fpn\".")
-
-    decoder = Decoder(  
-                        attention_dim=modelParams["attention_dim"],
-                        embed_dim=modelParams["embedding_dim"],
-                        decoder_dim=modelParams["decoder_dim"],
-                        dropout=modelParams["dropout"],
-                        decoderType=modelTypes["Decoder"],
-                        attentionType=modelTypes["Attention"]
-                    )
-
     # Initialize / load checkpoint
-    if trainParams["checkpoint"] is None:
+    if checkpoint is None:
+        decoder = DecoderWithAttention(attention_dim=attention_dim,
+                                       embed_dim=emb_dim,
+                                       decoder_dim=decoder_dim,
+                                       vocab_size=len(word_map),
+                                       dropout=dropout)
         decoder_optimizer = torch.optim.AdamW(params=filter(lambda p: p.requires_grad, decoder.parameters()),
-                                             lr=trainParams["decoder_learning_rate"])
+                                             lr=decoder_lr)
+        encoder = Encoder()
+        encoder.fine_tune(fine_tune_encoder)
         encoder_optimizer = torch.optim.AdamW(params=filter(lambda p: p.requires_grad, encoder.parameters()),
-                                             lr=trainParams["encoder_learning_rate"]) if trainParams["fine_tune_encoder"] else None
+                                             lr=encoder_lr) if fine_tune_encoder else None
 
     else:
-        checkpoint = torch.load(trainParams["checkpoint"])
+        # checkpoint = torch.load(checkpoint) # ***when loading from your own checkpoint, modify according to save_checkpoint in utils.py
+        # start_epoch = checkpoint['epoch'] + 1
+        # epochs_since_improvement = checkpoint['epochs_since_improvement']
+        # best_bleu4 = checkpoint['bleu-4']
+        # decoder = checkpoint['decoder']
+        # decoder_optimizer = checkpoint['decoder_optimizer']
+        # encoder = checkpoint['encoder']
+
+        checkpoint = torch.load(checkpoint)
         start_epoch = checkpoint['epoch'] + 1
         epochs_since_improvement = checkpoint['epochs_since_improvement']
         best_bleu4 = checkpoint['bleu-4']
-        encoder_state_dict = checkpoint['encoder_state_dict']
-        encoder_optimizer_state_dict = checkpoint['encoder_optimizer_state_dict']
         decoder_state_dict = checkpoint['decoder_state_dict']
         decoder_optimizer_state_dict = checkpoint['decoder_optimizer_state_dict']
-        
+        encoder_state_dict = checkpoint['encoder_state_dict']
+        encoder_optimizer_state_dict = checkpoint['encoder_optimizer_state_dict']
+
+        encoder = Encoder()
         encoder.load_state_dict(encoder_state_dict)
+
+        decoder = DecoderWithAttention(attention_dim=attention_dim,
+                                       embed_dim=emb_dim,
+                                       decoder_dim=decoder_dim,
+                                       vocab_size=len(word_map),
+                                       dropout=dropout)
         decoder.load_state_dict(decoder_state_dict)
 
         # Move to GPU, if available
         decoder = decoder.to(device)
         encoder = encoder.to(device)
 
-        decoder_optimizer = torch.optim.AdamW(params=filter(lambda p: p.requires_grad, decoder.parameters()))
+        decoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, decoder.parameters()))
+
         decoder_optimizer.load_state_dict(decoder_optimizer_state_dict)
 
+        # # ***pretrained issue https://discuss.pytorch.org/t/batchnorm2d-object-has-no-attribute-track-running-stats/17525/16
+        # for i, (name, module) in enumerate(encoder._modules.items()):
+        #     module = recursion_change_bn(encoder)
+        # # ***pretrained issue
+        
+
         encoder_optimizer = None
-        if trainParams["fine_tune_encoder"] is True:
-            if encoder_optimizer_state_dict is None:
-                encoder.fine_tune(True)
-                encoder_optimizer = torch.optim.AdamW(params=filter(lambda p: p.requires_grad, encoder.parameters()),
-                                                 lr=trainParams["encoder_learning_rate"])
-            else:
-                encoder_optimizer = torch.optim.AdamW(params=filter(lambda p: p.requires_grad, encoder.parameters()),
-                                                 lr=trainParams["encoder_learning_rate"])
-                encoder_optimizer.load_state_dict(encoder_optimizer_state_dict)
+        if fine_tune_encoder is True and encoder_optimizer_state_dict is None:
+            encoder.fine_tune(fine_tune_encoder)
+            encoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, encoder.parameters()),
+                                                 lr=encoder_lr)
+        elif encoder_optimizer_state_dict is not None:
+            encoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, encoder.parameters()))
+            encoder_optimizer.load_state_dict(encoder_optimizer_state_dict)
 
     # Move to GPU, if available
     decoder = decoder.to(device)
@@ -117,21 +137,21 @@ def main():
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
     train_loader = torch.utils.data.DataLoader(
-        CaptionDataset(img_data_folder, img_data_name, 'TRAIN', transform=transforms.Compose([normalize])),
-        batch_size=trainParams["batch_size"], shuffle=True, num_workers=1, pin_memory=True)
+        CaptionDataset(data_folder, data_name, 'TRAIN', transform=transforms.Compose([normalize])),
+        batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True)
     val_loader = torch.utils.data.DataLoader(
-        CaptionDataset(img_data_folder, img_data_name, 'VAL', transform=transforms.Compose([normalize])),
-        batch_size=trainParams["batch_size"], shuffle=True, num_workers=1, pin_memory=True)
+        CaptionDataset(data_folder, data_name, 'VAL', transform=transforms.Compose([normalize])),
+        batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True)
 
     # Epochs
-    for epoch in range(trainParams["start_epoch"], trainParams["num_epochs"]):
+    for epoch in range(start_epoch, epochs):
 
         # Decay learning rate if there is no improvement for 8 consecutive epochs, and terminate training after 20
         # if epochs_since_improvement == 20:
         #     break
         if epochs_since_improvement > 0 and epochs_since_improvement % 8 == 0:
             adjust_learning_rate(decoder_optimizer, 0.8)
-            if trainParams["fine_tune_encoder"]:
+            if fine_tune_encoder:
                 adjust_learning_rate(encoder_optimizer, 0.8)
 
         # One epoch's training
@@ -159,7 +179,7 @@ def main():
             epochs_since_improvement = 0
 
         # Save checkpoint
-        save_checkpoint(img_data_name, epoch, epochs_since_improvement, encoder, decoder, encoder_optimizer,
+        save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder, encoder_optimizer,
                         decoder_optimizer, recent_bleu4, is_best, epoch)
 
 
@@ -212,7 +232,7 @@ def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_
         loss = criterion(scores, targets)
 
         # Add doubly stochastic attention regularization
-        loss += trainParams["alpha_c"] * ((1. - alphas.sum(dim=1)) ** 2).mean()
+        loss += alpha_c * ((1. - alphas.sum(dim=1)) ** 2).mean()
 
         # Back prop.
         decoder_optimizer.zero_grad()
@@ -221,10 +241,10 @@ def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_
         loss.backward()
 
         # Clip gradients
-        if trainParams["grad_clip"] is not None:
-            clip_gradient(decoder_optimizer, trainParams["grad_clip"])
+        if grad_clip is not None:
+            clip_gradient(decoder_optimizer, grad_clip)
             if encoder_optimizer is not None:
-                clip_gradient(encoder_optimizer, trainParams["grad_clip"])
+                clip_gradient(encoder_optimizer, grad_clip)
 
         # Update weights
         decoder_optimizer.step()
@@ -304,8 +324,8 @@ def validate(val_loader, encoder, decoder, criterion):
             loss = criterion(scores, targets)
 
             # Add doubly stochastic attention regularization
-            loss += trainParams["alpha_c"] * ((1. - alphas.sum(dim=1)) ** 2).mean()
-            
+            loss += alpha_c * ((1. - alphas.sum(dim=1)) ** 2).mean()
+
             # Keep track of metrics
             losses.update(loss.item(), sum(decode_lengths))
             top5 = accuracy(scores, targets, 5)
