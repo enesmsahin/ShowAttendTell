@@ -222,8 +222,8 @@ def clip_gradient(optimizer, grad_clip):
                 param.grad.data.clamp_(-grad_clip, grad_clip)
 
 
-def save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder, encoder_optimizer, decoder_optimizer,
-                    bleu4, is_best, id):
+def save_checkpoint(data_name, epoch, epochs_since_improvement, encoderType, decoderType, attentionType, encoder, decoder, encoder_optimizer, decoder_optimizer,
+                    bleu4, is_best, id, outDir):
     """
     Saves model checkpoint.
 
@@ -237,6 +237,7 @@ def save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder
     :param bleu4: validation BLEU-4 score for this epoch
     :param is_best: is this checkpoint the best so far?
     :param id: checkpoint id
+    :out_path: path to output directory
     """
 
     """
@@ -253,16 +254,18 @@ def save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder
     state = {'epoch': epoch,
              'epochs_since_improvement': epochs_since_improvement,
              'bleu-4': bleu4,
+             'encoderType': encoderType,
+             'decoderType': decoderType,
+             'attentionType': attentionType,
              'encoder_state_dict': encoder.state_dict(),
              'decoder_state_dict': decoder.state_dict(),
              'encoder_optimizer_state_dict': encoder_optimizer.state_dict() if encoder_optimizer is not None else None,
              'decoder_optimizer_state_dict': decoder_optimizer.state_dict() if decoder_optimizer is not None else None}
 
-    filename = 'checkpoint_' + str(id) + '_' + data_name + '.pth.tar'
-    torch.save(state, filename)
-    # If this checkpoint is the best so far, store a copy so it doesn't get overwritten by a worse checkpoint
-    if is_best:
-        torch.save(state, 'BEST_' + filename)
+    prefix = "BEST_" if is_best else ""
+    filename = prefix + 'checkpoint_' + str(id) + '_' + data_name + '.pth.tar'
+    outFile = os.path.join(outDir, filename)
+    torch.save(state, outFile)
 
 
 class AverageMeter(object):

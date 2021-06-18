@@ -3,7 +3,6 @@ Model Type:
   Decoder: "LSTM" # one of LSTM, GRU
   Attention: "default" # one of default, concatenated
 
-
 Model Parameters:
   encoded_image_size: 16 # size of feature map to be passed into decoder (encoded_image_size x encoded_image_size)
   embedding_dim: 512 # dimension of word embeddings
@@ -12,11 +11,12 @@ Model Parameters:
   dropout: 0.5
 
 Training Parameters:
-  num_epochs: 20
-  batch_size: 128
+  start_epoch: 0
+  num_epochs: 30
+  batch_size: 64
   encoder_learning_rate: 0.0001
   decoder_learning_rate: 0.0001
   grad_clip: 5. # clip gradients at an absolute value of
   alpha_c: 1. # regularization parameter for 'doubly stochastic attention', as in the paper
   checkpoint: null # path to checkpoint file
-  fine_tune_encoder: False
+  fine_tune_encoder: True

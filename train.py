@@ -5,27 +5,35 @@ import torch.utils.data
 import torchvision.transforms as transforms
 from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence
+from torch.utils.tensorboard import SummaryWriter
 from models import Encoder, EncoderWide, EncoderFPN, Decoder
 from datasets import *
 from utils import *
 from nltk.translate.bleu_score import corpus_bleu
 import yaml
+import os
 
+out_dir = "/home/deepuser/deepnas/DISK4/DISK4/enes/mmi727_project/trainings/3/"
+config_path = out_dir + "config.yaml"
+
+log_path = os.path.join(out_dir, "./training_results")
+if not os.path.exists(log_path):
+    os.makedirs(log_path)
+
+summaryWriter = SummaryWriter(log_path)
 
 # Data parameters
 img_data_folder = '/home/deepuser/deepnas/DISK4/DISK4/enes/mmi727_project/coco/images'  # folder with data files saved by create_input_files.py
 img_data_name = 'coco_5_cap_per_img_5_min_word_freq'  # base name shared by data files
 
-config_path = "config.yaml" # path to config file
-
 cfgData = None
-with open("config.yaml", "r") as cfgFile:
+with open(config_path, "r") as cfgFile:
         cfgData = yaml.safe_load(cfgFile)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # sets device for model and PyTorch tensors
 cudnn.benchmark = True  # set to true only if inputs to model are fixed size; otherwise lot of computational overhead
 
-print_freq = 100  # print training/validation stats every __ batches
+print_freq = 50  # print training/validation stats every __ batches
 start_epoch = 0
 epochs_since_improvement = 0 # keeps track of number of epochs since there's been an improvement in validation BLEU
 best_bleu4 = 0. # Best BLEU-4 score until now
@@ -59,15 +67,24 @@ def main():
     else:
         raise Exception("Encoder Type must be one of \"default\", \"wide\", \"fpn\".")
 
+    encoder.fine_tune(trainParams["fine_tune_encoder"])
+    
+    decoderType = modelTypes["Decoder"]
+    attentionType = modelTypes["Attention"]
     decoder = Decoder(  
                         attention_dim=modelParams["attention_dim"],
                         embed_dim=modelParams["embedding_dim"],
                         decoder_dim=modelParams["decoder_dim"],
+                        vocab_size=len(word_map),
                         dropout=modelParams["dropout"],
-                        decoderType=modelTypes["Decoder"],
-                        attentionType=modelTypes["Attention"]
+                        decoderType=decoderType,
+                        attentionType=attentionType
                     )
 
+    print("Encoder Type: " + encoderType)
+    print("Decoder Type: " + decoderType)
+    print("Attention Type: " + attentionType)
+    
     # Initialize / load checkpoint
     if trainParams["checkpoint"] is None:
         decoder_optimizer = torch.optim.AdamW(params=filter(lambda p: p.requires_grad, decoder.parameters()),
@@ -147,7 +164,8 @@ def main():
         recent_bleu4 = validate(val_loader=val_loader,
                                 encoder=encoder,
                                 decoder=decoder,
-                                criterion=criterion)
+                                criterion=criterion,
+                                epoch=epoch)
 
         # Check if there was an improvement
         is_best = recent_bleu4 > best_bleu4
@@ -159,8 +177,8 @@ def main():
             epochs_since_improvement = 0
 
         # Save checkpoint
-        save_checkpoint(img_data_name, epoch, epochs_since_improvement, encoder, decoder, encoder_optimizer,
-                        decoder_optimizer, recent_bleu4, is_best, epoch)
+        save_checkpoint(img_data_name, epoch, epochs_since_improvement, encoderType, decoderType, attentionType, encoder, decoder, encoder_optimizer,
+                        decoder_optimizer, recent_bleu4, is_best, epoch, out_dir)
 
 
 def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_optimizer, epoch):
@@ -250,8 +268,13 @@ def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_
                                                                           data_time=data_time, loss=losses,
                                                                           top5=top5accs))
 
+            summaryWriter.add_scalar("train_loss_curr", losses.val, epoch * len(train_loader) + i)
+            summaryWriter.add_scalar("train_loss_avg", losses.avg, epoch * len(train_loader) + i)
+            summaryWriter.add_scalar("train_top5_acc_curr", top5accs.val, epoch * len(train_loader) + i)
+            summaryWriter.add_scalar("train_top5_acc_avg", top5accs.avg, epoch * len(train_loader) + i)
 
-def validate(val_loader, encoder, decoder, criterion):
+
+def validate(val_loader, encoder, decoder, criterion, epoch):
     """
     Performs one epoch's validation.
 
@@ -259,6 +282,7 @@ def validate(val_loader, encoder, decoder, criterion):
     :param encoder: encoder model
     :param decoder: decoder model
     :param criterion: loss layer
+    :param epoch: epoch number
     :return: BLEU-4 score
     """
     decoder.eval()  # eval mode (no dropout or batchnorm)
@@ -353,6 +377,10 @@ def validate(val_loader, encoder, decoder, criterion):
                 loss=losses,
                 top5=top5accs,
                 bleu=bleu4))
+
+        summaryWriter.add_scalar("val_loss_avg", losses.avg, epoch)
+        summaryWriter.add_scalar("val_top5_acc_avg", top5accs.avg, epoch)
+        summaryWriter.add_scalar("val_bleu4", bleu4, epoch)
 
     return bleu4
 
