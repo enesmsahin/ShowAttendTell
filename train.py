@@ -6,14 +6,14 @@ import torchvision.transforms as transforms
 from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence
 from torch.utils.tensorboard import SummaryWriter
-from models import Encoder, EncoderWide, EncoderFPN, Decoder
+from models import Encoder, EncoderWide, EncoderFPN, Decoder, EncoderFPN2, Decoder2layer
 from datasets import *
 from utils import *
 from nltk.translate.bleu_score import corpus_bleu
 import yaml
 import os
 
-out_dir = "/home/deepuser/deepnas/DISK4/DISK4/enes/mmi727_project/trainings/3/"
+out_dir = "/home/deepuser/deepnas/DISK4/DISK4/enes/mmi727_project/trainings/6/"
 config_path = out_dir + "config.yaml"
 
 log_path = os.path.join(out_dir, "./training_results")
@@ -64,26 +64,47 @@ def main():
         encoder = EncoderWide(endodedImageSize)
     elif encoderType == "fpn":
         encoder = EncoderFPN(endodedImageSize)
+    elif encoderType == "fpn2":
+        encoder = EncoderFPN2(endodedImageSize)
     else:
         raise Exception("Encoder Type must be one of \"default\", \"wide\", \"fpn\".")
 
     encoder.fine_tune(trainParams["fine_tune_encoder"])
     
     decoderType = modelTypes["Decoder"]
+    enable2LayerDecoder = modelTypes["Enable2LayerDecoder"]
     attentionType = modelTypes["Attention"]
-    decoder = Decoder(  
-                        attention_dim=modelParams["attention_dim"],
-                        embed_dim=modelParams["embedding_dim"],
-                        decoder_dim=modelParams["decoder_dim"],
-                        vocab_size=len(word_map),
-                        dropout=modelParams["dropout"],
-                        decoderType=decoderType,
-                        attentionType=attentionType
-                    )
+
+    encoder_dim = 2048 if encoderType != "fpn2" else 1024
+
+    if not enable2LayerDecoder:
+        decoder = Decoder(  
+                            attention_dim=modelParams["attention_dim"],
+                            embed_dim=modelParams["embedding_dim"],
+                            decoder_dim=modelParams["decoder_dim"],
+                            vocab_size=len(word_map),
+                            dropout=modelParams["dropout"],
+                            encoder_dim=encoder_dim,
+                            decoderType=decoderType,
+                            attentionType=attentionType
+                        )
+    else:
+        decoder = Decoder2layer(  
+                                    attention_dim=modelParams["attention_dim"],
+                                    embed_dim=modelParams["embedding_dim"],
+                                    decoder_dim=modelParams["decoder_dim"],
+                                    vocab_size=len(word_map),
+                                    dropout=modelParams["dropout"],
+                                    encoder_dim=encoder_dim,
+                                    decoderType=decoderType,
+                                    attentionType=attentionType
+                                )
 
     print("Encoder Type: " + encoderType)
     print("Decoder Type: " + decoderType)
     print("Attention Type: " + attentionType)
+    print("Encoder Dim: " + str(encoder_dim))
+    print("Enable2LayerDecoder: " + str(enable2LayerDecoder))
     
     # Initialize / load checkpoint
     if trainParams["checkpoint"] is None:
@@ -177,7 +198,7 @@ def main():
             epochs_since_improvement = 0
 
         # Save checkpoint
-        save_checkpoint(img_data_name, epoch, epochs_since_improvement, encoderType, decoderType, attentionType, encoder, decoder, encoder_optimizer,
+        save_checkpoint(img_data_name, epoch, epochs_since_improvement, encoderType, decoderType, enable2LayerDecoder, attentionType, encoder, decoder, encoder_optimizer,
                         decoder_optimizer, recent_bleu4, is_best, epoch, out_dir)
 
 

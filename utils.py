@@ -222,7 +222,7 @@ def clip_gradient(optimizer, grad_clip):
                 param.grad.data.clamp_(-grad_clip, grad_clip)
 
 
-def save_checkpoint(data_name, epoch, epochs_since_improvement, encoderType, decoderType, attentionType, encoder, decoder, encoder_optimizer, decoder_optimizer,
+def save_checkpoint(data_name, epoch, epochs_since_improvement, encoderType, decoderType, enable2LayerDecoder, attentionType, encoder, decoder, encoder_optimizer, decoder_optimizer,
                     bleu4, is_best, id, outDir):
     """
     Saves model checkpoint.
@@ -256,6 +256,7 @@ def save_checkpoint(data_name, epoch, epochs_since_improvement, encoderType, dec
              'bleu-4': bleu4,
              'encoderType': encoderType,
              'decoderType': decoderType,
+             'enable2LayerDecoder': enable2LayerDecoder,
              'attentionType': attentionType,
              'encoder_state_dict': encoder.state_dict(),
              'decoder_state_dict': decoder.state_dict(),
