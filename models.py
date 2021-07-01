@@ -331,7 +331,7 @@ class Decoder(nn.Module):
         @param encoder_dim: feature size of encoded images
         @param dropout: dropout
         @param attentionType: Type of the attention module: "default", "concatenated"
-        @param rnnType: Type of the RNN: "LSTM", "GRU"
+        @param decoderType: Type of the RNN: "LSTM", "GRU"
         """
         super().__init__()
 
@@ -463,7 +463,7 @@ class Decoder(nn.Module):
             elif self.decoderType == "GRU":
                 h = self.decode_step(torch.cat([embeddings[:batch_size_t, t, :], attention_weighted_encoding], dim=1), h[:batch_size_t])  # (batch_size_t, decoder_dim)
             else:
-                raise Exception("Cannot perform forward pass. rnnType should be one of \"LSTM\", \"GRU\"!")
+                raise Exception("Cannot perform forward pass. decoderType should be one of \"LSTM\", \"GRU\"!")
             preds = self.fc(self.dropout(h))  # (batch_size_t, vocab_size)
             predictions[:batch_size_t, t, :] = preds
             alphas[:batch_size_t, t, :] = alpha
@@ -483,7 +483,7 @@ class Decoder2layer(nn.Module):
         @param encoder_dim: feature size of encoded images
         @param dropout: dropout
         @param attentionType: Type of the attention module: "default", "concatenated"
-        @param rnnType: Type of the RNN: "LSTM", "GRU"
+        @param decoderType: Type of the RNN: "LSTM", "GRU"
         """
         super().__init__()
 
@@ -620,9 +620,9 @@ class Decoder2layer(nn.Module):
                 h_2, c_2 = self.decode_step_2(h_1[:batch_size_t], (h_2[:batch_size_t], c_2[:batch_size_t]))
             elif self.decoderType == "GRU":
                 h_1 = self.decode_step_1(torch.cat([embeddings[:batch_size_t, t, :], attention_weighted_encoding], dim=1), h_1[:batch_size_t])  # (batch_size_t, decoder_dim)
-                h_2 = self.decode_step_1(h_1[:batch_size_t], h_2[:batch_size_t])  # (batch_size_t, decoder_dim)
+                h_2 = self.decode_step_2(h_1[:batch_size_t], h_2[:batch_size_t])  # (batch_size_t, decoder_dim)
             else:
-                raise Exception("Cannot perform forward pass. rnnType should be one of \"LSTM\", \"GRU\"!")
+                raise Exception("Cannot perform forward pass. decoderType should be one of \"LSTM\", \"GRU\"!")
             preds = self.fc(self.dropout(h_2))  # (batch_size_t, vocab_size)
             predictions[:batch_size_t, t, :] = preds
             alphas[:batch_size_t, t, :] = alpha

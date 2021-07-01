@@ -13,7 +13,7 @@ from nltk.translate.bleu_score import corpus_bleu
 import yaml
 import os
 
-out_dir = "/home/deepuser/deepnas/DISK4/DISK4/enes/mmi727_project/trainings/6/"
+out_dir = "/home/deepuser/deepnas/DISK4/DISK4/enes/mmi727_project/trainings/7/"
 config_path = out_dir + "config.yaml"
 
 log_path = os.path.join(out_dir, "./training_results")
@@ -34,7 +34,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # sets de
 cudnn.benchmark = True  # set to true only if inputs to model are fixed size; otherwise lot of computational overhead
 
 print_freq = 50  # print training/validation stats every __ batches
-start_epoch = 0
+start_epoch = 0 # TODO remove this, it is unnecessary
 epochs_since_improvement = 0 # keeps track of number of epochs since there's been an improvement in validation BLEU
 best_bleu4 = 0. # Best BLEU-4 score until now
 
@@ -55,6 +55,7 @@ def main():
         word_map = json.load(j)
 
     # ***TODO: set fine_tune for necessary encoders
+    # ***TODO: remove fpn2 in train.py, models.py, eval.py
     encoder = None
     encoderType = modelTypes["Encoder"]
     endodedImageSize = modelParams["encoded_image_size"]
