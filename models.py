@@ -9,7 +9,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class Encoder(nn.Module):
     """
-    Encoder.
+    ResNet based encoder for encoding images.
     """
 
     def __init__(self, encoded_image_size=16):
@@ -113,7 +113,7 @@ class EncoderWide(nn.Module):
 
 class EncoderFPN(nn.Module):
     """
-    Encoder with 3-level Feature Pyramid Network
+    Encoder with 2-level Feature Pyramid Network
     """
 
     def __init__(self, encoded_image_size=16):
@@ -135,8 +135,6 @@ class EncoderFPN(nn.Module):
         self.adaptive_pool = nn.AdaptiveAvgPool2d((encoded_image_size, encoded_image_size))
 
         self.fine_tune()
-
-        # ***TODO: Make fine_tune(true) for this encoder in train.py
 
     def forward(self, images):
         """
@@ -177,77 +175,6 @@ class EncoderFPN(nn.Module):
             for p in c.parameters():
                 p.requires_grad = fine_tune
 
-
-class EncoderFPN2(nn.Module):
-    """
-    Encoder with 3-level Feature Pyramid Network
-    """
-
-    def __init__(self, encoded_image_size=16):
-        super().__init__()
-        self.enc_image_size = encoded_image_size
-
-        resnet = torchvision.models.resnet101(pretrained=True)  # pretrained ImageNet ResNet-101
-
-        modules_conv4_x = list(resnet.children())[:-3] # This is output of conv4_x layer in the original paper. Number of channels at the last layer is 1024. Spatial dimension is image_size / 16
-        self.resnet = nn.Sequential(*modules_conv4_x)
-
-        module_conv5_xResNet = list(resnet.children())[-3] # This is conv5_x layer in the original paper. Number of input channels is 1024, number of output channels is 2048.
-
-        self.conv5_xResNet = nn.Sequential(*module_conv5_xResNet)
-
-        self.c2_1x1 = nn.Conv2d(2048, 1024, kernel_size=(1, 1), stride=(1, 1))
-
-        self.smooth = nn.Conv2d(1024, 1024, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-
-        # Resize image to fixed size to allow input images of variable size
-        self.adaptive_pool = nn.AdaptiveAvgPool2d((encoded_image_size, encoded_image_size))
-
-        self.fine_tune()
-
-        # ***TODO: Make fine_tune(true) for this encoder in train.py
-
-    def forward(self, images):
-        """
-        Forward propagation.
-
-        :param images: images, a tensor of dimensions (batch_size, 3, image_size, image_size)
-        :return: encoded images
-        """
-        c1 = self.resnet(images)  # (batch_size, 1024, image_size/16, image_size/16)
-        
-        c2 = self.conv5_xResNet(c1) # (batch_size, 2048, image_size/32, image_size/32)
-        p2 = self.c2_1x1(c2) # (batch_size, 1024, image_size/32, image_size/32)
-        p1 = self.upsample_add(c1, p2) # (batch_size, 1024, image_size/16, image_size/16)
-        p1 = self.smooth(p1) # (batch_size, 1024, image_size/16, image_size/16)
-
-        out = self.adaptive_pool(p1)  # (batch_size, 1024, encoded_image_size, encoded_image_size)
-        out = out.permute(0, 2, 3, 1)  # (batch_size, encoded_image_size, encoded_image_size, 1024)
-        return out
-
-    def upsample_add(self, c, p):
-        """
-        p: map to be upsampled
-        c: map to be added to upsampled p
-        """
-        n, ch, h, w = c.shape
-        upsampled = F.upsample(p, size=(h, w), mode='bilinear')
-        return upsampled + c
-
-    def fine_tune(self, fine_tune=True):
-        """
-        Allow or prevent the computation of gradients for convolutional blocks after conv2_x block
-
-        :param fine_tune: Allow?
-        """
-        # for p in self.resnet.parameters():
-        #     p.requires_grad = False
-        # # If fine-tuning, only fine-tune convolutional blocks after conv2_x block
-        # for c in list(self.resnet.children())[5:]:
-        #     for p in c.parameters():
-        #         p.requires_grad = fine_tune
-        pass
-
 class Attention(nn.Module):
     """
     Attention Network.
@@ -284,7 +211,7 @@ class Attention(nn.Module):
 
 class ConcatenatedAttention(nn.Module):
     """
-    ConcatenatedAttention module which use concatenation of encoder and decoder
+    ConcatenatedAttention module which uses concatenation of encoder and decoder
     attention vectors instead of summing them up
     """
     def __init__(self, encoder_dim, decoder_dim, attention_dim):

@@ -12,6 +12,7 @@ from models import Encoder, EncoderWide, EncoderFPN, Decoder, Decoder2layer
 import os
 from imageio import imread
 from PIL import Image
+from utils import *
 import yaml
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # sets device for model and PyTorch tensors
@@ -247,84 +248,6 @@ def visualize_att(image_path, seq, alphas, rev_word_map, smooth=True):
         plt.axis('off')
     plt.show()
 
-
-def load_model(cfgData, checkpoint_path, word_map_file, is_train=False):
-    # Load model
-    vocab_size = len(word_map_file)
-
-    modelTypes = cfgData["Model Type"]
-    modelParams = cfgData["Model Parameters"]
-    trainParams = cfgData["Training Parameters"]
-
-
-    encoder = None
-    encoderType = modelTypes["Encoder"]
-    endodedImageSize = modelParams["encoded_image_size"]
-    if encoderType == "default":
-        encoder = Encoder(endodedImageSize)
-    elif encoderType == "wide":
-        encoder = EncoderWide(endodedImageSize)
-    elif encoderType == "fpn":
-        encoder = EncoderFPN(endodedImageSize)
-    else:
-        raise Exception("Encoder Type must be one of \"default\", \"wide\", \"fpn\".")
-
-    encoder.fine_tune(trainParams["fine_tune_encoder"])
-        
-    decoderType = modelTypes["Decoder"]
-    enable2LayerDecoder = modelTypes["Enable2LayerDecoder"]
-    attentionType = modelTypes["Attention"]
-
-    encoder_dim = 2048
-
-    if not enable2LayerDecoder:
-        decoder = Decoder(  
-                            attention_dim=modelParams["attention_dim"],
-                            embed_dim=modelParams["embedding_dim"],
-                            decoder_dim=modelParams["decoder_dim"],
-                            vocab_size=vocab_size,
-                            dropout=modelParams["dropout"],
-                            encoder_dim=encoder_dim,
-                            decoderType=decoderType,
-                            attentionType=attentionType
-                        )
-    else:
-        decoder = Decoder2layer(  
-                                    attention_dim=modelParams["attention_dim"],
-                                    embed_dim=modelParams["embedding_dim"],
-                                    decoder_dim=modelParams["decoder_dim"],
-                                    vocab_size=vocab_size,
-                                    dropout=modelParams["dropout"],
-                                    encoder_dim=encoder_dim,
-                                    decoderType=decoderType,
-                                    attentionType=attentionType
-                                )
-    print("Encoder Type: " + encoderType)
-    print("Decoder Type: " + decoderType)
-    print("Attention Type: " + attentionType)
-    print("Encoder Dim: " + str(encoder_dim))
-    print("Enable2LayerDecoder: " + str(enable2LayerDecoder))
-
-    checkpoint = torch.load(checkpoint_path)
-    encoder_state_dict = checkpoint['encoder_state_dict']
-    decoder_state_dict = checkpoint['decoder_state_dict']
-    encoder.load_state_dict(encoder_state_dict)
-    decoder.load_state_dict(decoder_state_dict)
-
-    # Move to GPU, if available
-    encoder = encoder.to(device)
-    decoder = decoder.to(device)
-
-    if is_train:
-        encoder.train()
-        decoder.train()
-    else:
-        encoder.eval()
-        decoder.eval()
-
-    return encoder, decoder
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Show, Attend, and Tell - Generate Caption')
 
@@ -349,7 +272,7 @@ if __name__ == '__main__':
     with open(args.config_path, "r") as cfgFile:
             cfgData = yaml.safe_load(cfgFile)
 
-    encoder, decoder = load_model(cfgData, args.checkpoint_path, word_map)
+    encoder, decoder = load_pretrained_model_for_inference(args.config_path, len(word_map), args.checkpoint_path)
 
     # Encode, decode with attention and beam search
     seq, alphas = caption_image_beam_search(encoder, decoder, cfgData, args.img, word_map, args.beam_size)

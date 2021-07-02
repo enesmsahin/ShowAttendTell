@@ -1,3 +1,4 @@
+from json import decoder
 import torch.backends.cudnn as cudnn
 import torch.optim
 import torch.utils.data
@@ -13,6 +14,10 @@ import yaml
 import argparse
 
 parser = argparse.ArgumentParser("Evaluation script!")
+
+cudnn.benchmark = True  # set to true only if inputs to model are fixed size; otherwise lot of computational overhead
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # sets device for model and PyTorch tensors
+
 
 def evaluate(beam_size, checkpoint_path, config_path):
     """
@@ -42,74 +47,12 @@ def evaluate(beam_size, checkpoint_path, config_path):
     rev_word_map = {v: k for k, v in word_map.items()}
     vocab_size = len(word_map)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # sets device for model and PyTorch tensors
-    cudnn.benchmark = True  # set to true only if inputs to model are fixed size; otherwise lot of computational overhead
 
     modelTypes = cfgData["Model Type"]
-    modelParams = cfgData["Model Parameters"]
-    trainParams = cfgData["Training Parameters"]
-
-
-    encoder = None
-    encoderType = modelTypes["Encoder"]
-    endodedImageSize = modelParams["encoded_image_size"]
-    if encoderType == "default":
-        encoder = Encoder(endodedImageSize)
-    elif encoderType == "wide":
-        encoder = EncoderWide(endodedImageSize)
-    elif encoderType == "fpn":
-        encoder = EncoderFPN(endodedImageSize)
-    else:
-        raise Exception("Encoder Type must be one of \"default\", \"wide\", \"fpn\".")
-
-    encoder.fine_tune(trainParams["fine_tune_encoder"])
-        
     decoderType = modelTypes["Decoder"]
     enable2LayerDecoder = modelTypes["Enable2LayerDecoder"]
-    attentionType = modelTypes["Attention"]
 
-    encoder_dim = 2048
-
-    if not enable2LayerDecoder:
-        decoder = Decoder(  
-                            attention_dim=modelParams["attention_dim"],
-                            embed_dim=modelParams["embedding_dim"],
-                            decoder_dim=modelParams["decoder_dim"],
-                            vocab_size=vocab_size,
-                            dropout=modelParams["dropout"],
-                            encoder_dim=encoder_dim,
-                            decoderType=decoderType,
-                            attentionType=attentionType
-                        )
-    else:
-        decoder = Decoder2layer(  
-                                    attention_dim=modelParams["attention_dim"],
-                                    embed_dim=modelParams["embedding_dim"],
-                                    decoder_dim=modelParams["decoder_dim"],
-                                    vocab_size=vocab_size,
-                                    dropout=modelParams["dropout"],
-                                    encoder_dim=encoder_dim,
-                                    decoderType=decoderType,
-                                    attentionType=attentionType
-                                )
-    print("Encoder Type: " + encoderType)
-    print("Decoder Type: " + decoderType)
-    print("Attention Type: " + attentionType)
-    print("Encoder Dim: " + str(encoder_dim))
-    print("Enable2LayerDecoder: " + str(enable2LayerDecoder))
-
-    checkpoint = torch.load(checkpoint_path)
-    encoder_state_dict = checkpoint['encoder_state_dict']
-    decoder_state_dict = checkpoint['decoder_state_dict']
-    encoder.load_state_dict(encoder_state_dict)
-    decoder.load_state_dict(decoder_state_dict)
-
-    # Move to GPU, if available
-    encoder = encoder.to(device)
-    decoder = decoder.to(device)
-
-    encoder.eval()
-    decoder.eval()
+    encoder, decoder = load_pretrained_model_for_inference(config_path, vocab_size, checkpoint_path)
 
     # Normalization transform
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],

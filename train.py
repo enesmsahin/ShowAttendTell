@@ -6,7 +6,7 @@ import torchvision.transforms as transforms
 from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence
 from torch.utils.tensorboard import SummaryWriter
-from models import Encoder, EncoderWide, EncoderFPN, Decoder, EncoderFPN2, Decoder2layer
+from models import Encoder, EncoderWide, EncoderFPN, Decoder, Decoder2layer
 from datasets import *
 from utils import *
 from nltk.translate.bleu_score import corpus_bleu
@@ -34,7 +34,6 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # sets de
 cudnn.benchmark = True  # set to true only if inputs to model are fixed size; otherwise lot of computational overhead
 
 print_freq = 50  # print training/validation stats every __ batches
-start_epoch = 0 # TODO remove this, it is unnecessary
 epochs_since_improvement = 0 # keeps track of number of epochs since there's been an improvement in validation BLEU
 best_bleu4 = 0. # Best BLEU-4 score until now
 
@@ -47,15 +46,13 @@ def main():
     Training and validation.
     """
 
-    global best_bleu4, epochs_since_improvement, start_epoch, img_data_name, word_map
+    global best_bleu4, epochs_since_improvement, img_data_name, word_map
 
     # Read word map
     word_map_file = os.path.join(img_data_folder, 'WORDMAP_' + img_data_name + '.json')
     with open(word_map_file, 'r') as j:
         word_map = json.load(j)
 
-    # ***TODO: set fine_tune for necessary encoders
-    # ***TODO: remove fpn2 in train.py, models.py, eval.py
     encoder = None
     encoderType = modelTypes["Encoder"]
     endodedImageSize = modelParams["encoded_image_size"]
@@ -65,8 +62,6 @@ def main():
         encoder = EncoderWide(endodedImageSize)
     elif encoderType == "fpn":
         encoder = EncoderFPN(endodedImageSize)
-    elif encoderType == "fpn2":
-        encoder = EncoderFPN2(endodedImageSize)
     else:
         raise Exception("Encoder Type must be one of \"default\", \"wide\", \"fpn\".")
 
@@ -76,7 +71,7 @@ def main():
     enable2LayerDecoder = modelTypes["Enable2LayerDecoder"]
     attentionType = modelTypes["Attention"]
 
-    encoder_dim = 2048 if encoderType != "fpn2" else 1024
+    encoder_dim = 2048
 
     if not enable2LayerDecoder:
         decoder = Decoder(  
@@ -116,7 +111,6 @@ def main():
 
     else:
         checkpoint = torch.load(trainParams["checkpoint"])
-        start_epoch = checkpoint['epoch'] + 1
         epochs_since_improvement = checkpoint['epochs_since_improvement']
         best_bleu4 = checkpoint['bleu-4']
         encoder_state_dict = checkpoint['encoder_state_dict']
