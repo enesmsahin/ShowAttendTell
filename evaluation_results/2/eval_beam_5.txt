@@ -1,0 +1,8 @@
+EVALUATING AT BEAM SIZE 5:   0%|          | 0/25000 [00:00<?, ?it/s]Encoder Type: default
+Decoder Type: LSTM
+Attention Type: concatenated
+Encoder Dim: 2048
+Enable2LayerDecoder: False
+EVALUATING AT BEAM SIZE 5: 100%|██████████| 25000/25000 [16:26<00:00, 25.35it/s]
+
+BLEU-4 score @ beam size of 5 is 0.3337.
