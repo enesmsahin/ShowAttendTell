@@ -71,9 +71,7 @@ def main():
     # Epochs
     for epoch in range(trainParams["start_epoch"], trainParams["num_epochs"]):
 
-        # Decay learning rate if there is no improvement for 8 consecutive epochs, and terminate training after 20
-        # if epochs_since_improvement == 20:
-        #     break
+        # Decay learning rate if there is no improvement for 8 consecutive epochs.
         if epochs_since_improvement > 0 and epochs_since_improvement % 8 == 0:
             adjust_learning_rate(decoder_optimizer, 0.8)
             if trainParams["fine_tune_encoder"]:
@@ -150,7 +148,6 @@ def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_
 
         # Remove timesteps that we didn't decode at, or are pads
         # pack_padded_sequence is an easy trick to do this
-        # ***too many values to unpack error https://github.com/sgrvinod/a-PyTorch-Tutorial-to-Image-Captioning/issues/86
         scores = pack_padded_sequence(scores, decode_lengths, batch_first=True).data
         targets = pack_padded_sequence(targets, decode_lengths, batch_first=True).data
 
@@ -247,7 +244,6 @@ def validate(val_loader, encoder, decoder, criterion, epoch):
 
             # Remove timesteps that we didn't decode at, or are pads
             # pack_padded_sequence is an easy trick to do this
-            # ***too many values to unpack error https://github.com/sgrvinod/a-PyTorch-Tutorial-to-Image-Captioning/issues/86
             scores_copy = scores.clone()
             scores = pack_padded_sequence(scores, decode_lengths, batch_first=True).data
             targets = pack_padded_sequence(targets, decode_lengths, batch_first=True).data

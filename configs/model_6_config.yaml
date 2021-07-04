@@ -14,7 +14,7 @@ Model Parameters:
 Training Parameters:
   start_epoch: 0
   num_epochs: 30
-  batch_size: 64
+  batch_size: 2 # 64 is used during training.
   encoder_learning_rate: 0.0001
   decoder_learning_rate: 0.0001
   grad_clip: 5. # clip gradients at an absolute value of

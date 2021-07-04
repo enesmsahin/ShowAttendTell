@@ -8,7 +8,6 @@ import matplotlib.cm as cm
 import skimage.transform
 import argparse
 from PIL import Image
-from models import Encoder, EncoderWide, EncoderFPN, Decoder, Decoder2layer
 import os
 from imageio import imread
 from PIL import Image

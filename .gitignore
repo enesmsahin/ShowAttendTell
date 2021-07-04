@@ -1,0 +1,5 @@
+test_images/**
+configs_test/**
+dataset/**
+__pycache__/**
+checkpoints/**

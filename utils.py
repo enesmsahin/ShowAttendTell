@@ -435,18 +435,6 @@ def save_checkpoint(data_name, epoch, epochs_since_improvement, encoderType, dec
     :param id: checkpoint id
     :out_path: path to output directory
     """
-
-    """
-    # *** error might be encountered https://github.com/sgrvinod/a-PyTorch-Tutorial-to-Image-Captioning/issues/86#issuecomment-622783546
-    state = {'epoch': epoch,
-             'epochs_since_improvement': epochs_since_improvement,
-             'bleu-4': bleu4,
-             'encoder': encoder,
-             'decoder': decoder,
-             'encoder_optimizer': encoder_optimizer,
-             'decoder_optimizer': decoder_optimizer}
-    """
-
     state = {'epoch': epoch,
              'epochs_since_improvement': epochs_since_improvement,
              'bleu-4': bleu4,
