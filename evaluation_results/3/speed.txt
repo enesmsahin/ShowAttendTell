@@ -1,0 +1,18 @@
+Encoder Type: default
+Decoder Type: GRU
+Attention Type: default
+Encoder Dim: 2048
+Enable2LayerDecoder: False
+Average execution time: 28.132526664981015 ms
+Median execution time: 27.242245000707044 ms
+
+
+Encoder Type: default
+Decoder Type: GRU
+Attention Type: default
+Encoder Dim: 2048
+Enable2LayerDecoder: False
+Average execution time: 45.41415500259973 ms
+Median execution time: 44.72111700033565 ms
+
+

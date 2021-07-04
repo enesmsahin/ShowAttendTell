@@ -1,0 +1,18 @@
+Encoder Type: default
+Decoder Type: LSTM
+Attention Type: default
+Encoder Dim: 2048
+Enable2LayerDecoder: True
+Average execution time: 28.9773447150219 ms
+Median execution time: 28.09478949984623 ms
+
+
+Encoder Type: default
+Decoder Type: LSTM
+Attention Type: default
+Encoder Dim: 2048
+Enable2LayerDecoder: True
+Average execution time: 47.064810879955985 ms
+Median execution time: 46.64257900003577 ms
+
+

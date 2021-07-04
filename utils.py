@@ -3,16 +3,213 @@ import numpy as np
 import h5py
 import json
 import torch
-# from scipy.misc import imread, imresize
 from imageio import imread
-# from skimage.transform import resize as imresize
 from PIL import Image
 from tqdm import tqdm
 from collections import Counter
 from random import seed, choice, sample
-
 from shutil import copy
 
+from models import Encoder, EncoderWide, EncoderFPN, Decoder, Decoder2layer
+import yaml
+
+def create_model_for_training(config_path, vocab_size):
+    """!
+    Creates a model and returns encoder, decoder
+
+    @param config_path: config.yaml for model to be loaded
+    @param vocab_size: size of vocabulary
+    @return encoder, decoder models. Loaded to the GPU if available.
+    """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # sets device for model and PyTorch tensors
+
+    # Load model
+    cfgData = None
+    with open(config_path, "r") as cfgFile:
+            cfgData = yaml.safe_load(cfgFile)
+
+    modelTypes = cfgData["Model Type"]
+    modelParams = cfgData["Model Parameters"]
+    trainParams = cfgData["Training Parameters"]
+
+    encoder = None
+    encoderType = modelTypes["Encoder"]
+    endodedImageSize = modelParams["encoded_image_size"]
+    if encoderType == "default":
+        encoder = Encoder(endodedImageSize)
+    elif encoderType == "wide":
+        encoder = EncoderWide(endodedImageSize)
+    elif encoderType == "fpn":
+        encoder = EncoderFPN(endodedImageSize)
+    else:
+        raise Exception("Encoder Type must be one of \"default\", \"wide\", \"fpn\".")
+
+    encoder.fine_tune(trainParams["fine_tune_encoder"])
+        
+    decoderType = modelTypes["Decoder"]
+    enable2LayerDecoder = modelTypes["Enable2LayerDecoder"]
+    attentionType = modelTypes["Attention"]
+
+    encoder_dim = 2048
+
+    if not enable2LayerDecoder:
+        decoder = Decoder(  
+                            attention_dim=modelParams["attention_dim"],
+                            embed_dim=modelParams["embedding_dim"],
+                            decoder_dim=modelParams["decoder_dim"],
+                            vocab_size=vocab_size,
+                            dropout=modelParams["dropout"],
+                            encoder_dim=encoder_dim,
+                            decoderType=decoderType,
+                            attentionType=attentionType
+                        )
+    else:
+        decoder = Decoder2layer(  
+                                    attention_dim=modelParams["attention_dim"],
+                                    embed_dim=modelParams["embedding_dim"],
+                                    decoder_dim=modelParams["decoder_dim"],
+                                    vocab_size=vocab_size,
+                                    dropout=modelParams["dropout"],
+                                    encoder_dim=encoder_dim,
+                                    decoderType=decoderType,
+                                    attentionType=attentionType
+                                )
+    print("Encoder Type: " + encoderType)
+    print("Decoder Type: " + decoderType)
+    print("Attention Type: " + attentionType)
+    print("Encoder Dim: " + str(encoder_dim))
+    print("Enable2LayerDecoder: " + str(enable2LayerDecoder))
+
+    
+    # load model and create necessary optimizers for training
+    # Initialize / load checkpoint for training
+    epochs_since_improvement = 0
+    best_bleu4 = 0
+    if trainParams["checkpoint"] is None: # if pretrained model is not available
+        decoder_optimizer = torch.optim.AdamW(params=filter(lambda p: p.requires_grad, decoder.parameters()),
+                                            lr=trainParams["decoder_learning_rate"])
+        encoder_optimizer = torch.optim.AdamW(params=filter(lambda p: p.requires_grad, encoder.parameters()),
+                                            lr=trainParams["encoder_learning_rate"]) if trainParams["fine_tune_encoder"] else None
+
+    else: # if pretrained model is available
+        checkpoint = torch.load(trainParams["checkpoint"])
+        epochs_since_improvement = checkpoint['epochs_since_improvement']
+        best_bleu4 = checkpoint['bleu-4']
+        encoder_state_dict = checkpoint['encoder_state_dict']
+        encoder_optimizer_state_dict = checkpoint['encoder_optimizer_state_dict']
+        decoder_state_dict = checkpoint['decoder_state_dict']
+        decoder_optimizer_state_dict = checkpoint['decoder_optimizer_state_dict']
+        
+        encoder.load_state_dict(encoder_state_dict)
+        decoder.load_state_dict(decoder_state_dict)
+
+        decoder_optimizer = torch.optim.AdamW(params=filter(lambda p: p.requires_grad, decoder.parameters()))
+        decoder_optimizer.load_state_dict(decoder_optimizer_state_dict)
+
+        encoder_optimizer = None
+        if trainParams["fine_tune_encoder"] is True:
+            if encoder_optimizer_state_dict is None:
+                encoder.fine_tune(True)
+                encoder_optimizer = torch.optim.AdamW(params=filter(lambda p: p.requires_grad, encoder.parameters()),
+                                                lr=trainParams["encoder_learning_rate"])
+            else:
+                encoder_optimizer = torch.optim.AdamW(params=filter(lambda p: p.requires_grad, encoder.parameters()),
+                                                lr=trainParams["encoder_learning_rate"])
+                encoder_optimizer.load_state_dict(encoder_optimizer_state_dict)
+
+    encoder.train()
+    decoder.train()
+
+    # Move to GPU, if available
+    encoder = encoder.to(device)
+    decoder = decoder.to(device)        
+
+    return encoder, decoder, encoder_optimizer, decoder_optimizer, epochs_since_improvement, best_bleu4, encoderType, decoderType, attentionType, enable2LayerDecoder
+
+def load_pretrained_model_for_inference(config_path, vocab_size, checkpoint_path=None):
+    """!
+    Loads a pretrained model and returns encoder, decoder
+
+    @param config_path: config.yaml for model to be loaded
+    @param vocab_size: size of vocabulary
+    @param checkpoint_path: path to pretrained model. If None, weights are initialized from scratch
+    @return encoder, decoder models. Loaded to the GPU if available.
+    """
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # sets device for model and PyTorch tensors
+
+    # Load model
+    cfgData = None
+    with open(config_path, "r") as cfgFile:
+            cfgData = yaml.safe_load(cfgFile)
+
+    modelTypes = cfgData["Model Type"]
+    modelParams = cfgData["Model Parameters"]
+    trainParams = cfgData["Training Parameters"]
+
+    encoder = None
+    encoderType = modelTypes["Encoder"]
+    endodedImageSize = modelParams["encoded_image_size"]
+    if encoderType == "default":
+        encoder = Encoder(endodedImageSize)
+    elif encoderType == "wide":
+        encoder = EncoderWide(endodedImageSize)
+    elif encoderType == "fpn":
+        encoder = EncoderFPN(endodedImageSize)
+    else:
+        raise Exception("Encoder Type must be one of \"default\", \"wide\", \"fpn\".")
+
+    encoder.fine_tune(trainParams["fine_tune_encoder"])
+        
+    decoderType = modelTypes["Decoder"]
+    enable2LayerDecoder = modelTypes["Enable2LayerDecoder"]
+    attentionType = modelTypes["Attention"]
+
+    encoder_dim = 2048
+
+    if not enable2LayerDecoder:
+        decoder = Decoder(  
+                            attention_dim=modelParams["attention_dim"],
+                            embed_dim=modelParams["embedding_dim"],
+                            decoder_dim=modelParams["decoder_dim"],
+                            vocab_size=vocab_size,
+                            dropout=modelParams["dropout"],
+                            encoder_dim=encoder_dim,
+                            decoderType=decoderType,
+                            attentionType=attentionType
+                        )
+    else:
+        decoder = Decoder2layer(  
+                                    attention_dim=modelParams["attention_dim"],
+                                    embed_dim=modelParams["embedding_dim"],
+                                    decoder_dim=modelParams["decoder_dim"],
+                                    vocab_size=vocab_size,
+                                    dropout=modelParams["dropout"],
+                                    encoder_dim=encoder_dim,
+                                    decoderType=decoderType,
+                                    attentionType=attentionType
+                                )
+    print("Encoder Type: " + encoderType)
+    print("Decoder Type: " + decoderType)
+    print("Attention Type: " + attentionType)
+    print("Encoder Dim: " + str(encoder_dim))
+    print("Enable2LayerDecoder: " + str(enable2LayerDecoder))
+
+    if checkpoint_path != None:
+        checkpoint = torch.load(checkpoint_path)
+        encoder_state_dict = checkpoint['encoder_state_dict']
+        decoder_state_dict = checkpoint['decoder_state_dict']
+        encoder.load_state_dict(encoder_state_dict)
+        decoder.load_state_dict(decoder_state_dict)
+
+    encoder.eval()
+    decoder.eval()
+
+    # Move to GPU, if available
+    encoder = encoder.to(device)
+    decoder = decoder.to(device)        
+
+    return encoder, decoder 
 
 def create_input_files(dataset, karpathy_json_path, image_folder, captions_per_image, min_word_freq, output_folder,
                        max_len=100):
@@ -215,15 +412,14 @@ def clip_gradient(optimizer, grad_clip):
     :param optimizer: optimizer with the gradients to be clipped
     :param grad_clip: clip value
     """
-    # ***TODO: this clipping strategy may be modified to clip only lstm weights
     for group in optimizer.param_groups:
         for param in group['params']:
             if param.grad is not None:
                 param.grad.data.clamp_(-grad_clip, grad_clip)
 
 
-def save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder, encoder_optimizer, decoder_optimizer,
-                    bleu4, is_best, id):
+def save_checkpoint(data_name, epoch, epochs_since_improvement, encoderType, decoderType, enable2LayerDecoder, attentionType, encoder, decoder, encoder_optimizer, decoder_optimizer,
+                    bleu4, is_best, id, outDir):
     """
     Saves model checkpoint.
 
@@ -237,32 +433,24 @@ def save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder
     :param bleu4: validation BLEU-4 score for this epoch
     :param is_best: is this checkpoint the best so far?
     :param id: checkpoint id
+    :out_path: path to output directory
     """
-
-    """
-    # *** error might be encountered https://github.com/sgrvinod/a-PyTorch-Tutorial-to-Image-Captioning/issues/86#issuecomment-622783546
     state = {'epoch': epoch,
              'epochs_since_improvement': epochs_since_improvement,
              'bleu-4': bleu4,
-             'encoder': encoder,
-             'decoder': decoder,
-             'encoder_optimizer': encoder_optimizer,
-             'decoder_optimizer': decoder_optimizer}
-    """
-
-    state = {'epoch': epoch,
-             'epochs_since_improvement': epochs_since_improvement,
-             'bleu-4': bleu4,
+             'encoderType': encoderType,
+             'decoderType': decoderType,
+             'enable2LayerDecoder': enable2LayerDecoder,
+             'attentionType': attentionType,
              'encoder_state_dict': encoder.state_dict(),
              'decoder_state_dict': decoder.state_dict(),
              'encoder_optimizer_state_dict': encoder_optimizer.state_dict() if encoder_optimizer is not None else None,
              'decoder_optimizer_state_dict': decoder_optimizer.state_dict() if decoder_optimizer is not None else None}
 
-    filename = 'checkpoint_' + str(id) + '_' + data_name + '.pth.tar'
-    torch.save(state, filename)
-    # If this checkpoint is the best so far, store a copy so it doesn't get overwritten by a worse checkpoint
-    if is_best:
-        torch.save(state, 'BEST_' + filename)
+    prefix = "BEST_" if is_best else ""
+    filename = prefix + 'checkpoint_' + str(id) + '_' + data_name + '.pth.tar'
+    outFile = os.path.join(outDir, filename)
+    torch.save(state, outFile)
 
 
 class AverageMeter(object):

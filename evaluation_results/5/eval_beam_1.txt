@@ -1,0 +1,17 @@
+EVALUATING AT BEAM SIZE 1:   0%|          | 0/25000 [00:00<?, ?it/s]Encoder Type: fpn
+Decoder Type: LSTM
+Attention Type: default
+Encoder Dim: 2048
+Enable2LayerDecoder: False
+/home/deepuser/deepnas/DISK4/DISK4/enes/mmi727_project/myEnvironment/showAttendTell/lib/python3.8/site-packages/torch/nn/functional.py:3328: UserWarning: nn.functional.upsample is deprecated. Use nn.functional.interpolate instead.
+  warnings.warn("nn.functional.upsample is deprecated. Use nn.functional.interpolate instead.")
+/home/deepuser/deepnas/DISK4/DISK4/enes/mmi727_project/myEnvironment/showAttendTell/lib/python3.8/site-packages/torch/nn/functional.py:3454: UserWarning: Default upsampling behavior when mode=bilinear is changed to align_corners=False since 0.4.0. Please specify align_corners=True if the old behavior is desired. See the documentation of nn.Upsample for details.
+  warnings.warn(
+EVALUATING AT BEAM SIZE 1: 100%|██████████| 25000/25000 [13:18<00:00, 31.30it/s]
+Too long sequence!
+Too long sequence!
+Too long sequence!
+Too long sequence!
+Too long sequence!
+
+BLEU-4 score @ beam size of 1 is 0.3068.

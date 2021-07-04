@@ -1,0 +1,23 @@
+Model Type:
+  Encoder: "fpn" # one of default, wide, fpn
+  Decoder: "LSTM" # one of LSTM, GRU
+  Enable2LayerDecoder: False
+  Attention: "default" # one of default, concatenated
+
+Model Parameters:
+  encoded_image_size: 14 # size of feature map to be passed into decoder (encoded_image_size x encoded_image_size)
+  embedding_dim: 512 # dimension of word embeddings
+  attention_dim: 512 # dimension of attention linear layers
+  decoder_dim: 512 # dimension of decoder RNN
+  dropout: 0.5
+
+Training Parameters:
+  start_epoch: 0
+  num_epochs: 30
+  batch_size: 2 # 64 is used during training.
+  encoder_learning_rate: 0.0001
+  decoder_learning_rate: 0.0001
+  grad_clip: 5. # clip gradients at an absolute value of
+  alpha_c: 1. # regularization parameter for 'doubly stochastic attention', as in the paper
+  checkpoint: null # path to checkpoint file
+  fine_tune_encoder: True

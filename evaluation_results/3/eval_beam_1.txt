@@ -1,0 +1,18 @@
+EVALUATING AT BEAM SIZE 1:   0%|          | 0/25000 [00:00<?, ?it/s]Encoder Type: default
+Decoder Type: GRU
+Attention Type: default
+Encoder Dim: 2048
+Enable2LayerDecoder: False
+EVALUATING AT BEAM SIZE 1: 100%|██████████| 25000/25000 [12:37<00:00, 33.00it/s]
+Too long sequence!
+Too long sequence!
+Too long sequence!
+Too long sequence!
+Too long sequence!
+Too long sequence!
+Too long sequence!
+Too long sequence!
+Too long sequence!
+Too long sequence!
+
+BLEU-4 score @ beam size of 1 is 0.2976.

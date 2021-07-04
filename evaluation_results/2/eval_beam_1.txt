@@ -1,0 +1,13 @@
+EVALUATING AT BEAM SIZE 1:   0%|          | 0/25000 [00:00<?, ?it/s]Encoder Type: default
+Decoder Type: LSTM
+Attention Type: concatenated
+Encoder Dim: 2048
+Enable2LayerDecoder: False
+EVALUATING AT BEAM SIZE 1: 100%|██████████| 25000/25000 [12:36<00:00, 33.06it/s]
+Too long sequence!
+Too long sequence!
+Too long sequence!
+Too long sequence!
+Too long sequence!
+
+BLEU-4 score @ beam size of 1 is 0.3040.
