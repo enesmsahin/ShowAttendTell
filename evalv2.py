@@ -26,13 +26,13 @@ def evaluate(beam_size, checkpoint_path, config_path):
     :param beam_size: beam size at which to generate captions for evaluation
     :return: BLEU-4 score
     """
-    # model_path = "/home/deepuser/deepnas/DISK4/DISK4/enes/mmi727_project/trainings/1/"
+    # model_path = "/home/enes/mmi727_project/trainings/1/"
 
     # checkpoint_path = os.path.join(model_path, "BEST_checkpoint_10_coco_5_cap_per_img_5_min_word_freq.pth.tar") # model checkpoint
     # config_path = os.path.join(model_path, "config.yaml")
 
     # Data parameters
-    img_data_folder = '/home/deepuser/deepnas/DISK4/DISK4/enes/mmi727_project/coco/images'  # folder with data files saved by create_input_files.py
+    img_data_folder = '/home/enes/mmi727_project/coco/images'  # folder with data files saved by create_input_files.py
     img_data_name = 'coco_5_cap_per_img_5_min_word_freq'  # base name shared by data files
 
     word_map_file = os.path.join(img_data_folder, 'WORDMAP_' + img_data_name + '.json')  # word map, ensure it's the same the data was encoded with and the model was trained with

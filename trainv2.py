@@ -12,7 +12,7 @@ from nltk.translate.bleu_score import corpus_bleu
 import yaml
 import os
 
-out_dir = "/home/deepuser/deepnas/DISK4/DISK4/enes/mmi727_project/trainings/7/"
+out_dir = "/home/enes/mmi727_project/trainings/7/"
 config_path = out_dir + "config.yaml"
 
 log_path = os.path.join(out_dir, "./training_results")
@@ -22,7 +22,7 @@ if not os.path.exists(log_path):
 summaryWriter = SummaryWriter(log_path)
 
 # Data parameters
-img_data_folder = '/home/deepuser/deepnas/DISK4/DISK4/enes/mmi727_project/coco/images'  # folder with data files saved by create_input_files.py
+img_data_folder = '/home/enes/mmi727_project/coco/images'  # folder with data files saved by create_input_files.py
 img_data_name = 'coco_5_cap_per_img_5_min_word_freq'  # base name shared by data files
 
 cfgData = None

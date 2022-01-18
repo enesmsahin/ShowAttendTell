@@ -2,9 +2,9 @@ Encoder Type: fpn
 Decoder Type: LSTM
 Attention Type: default
 Encoder Dim: 2048
-/home/deepuser/deepnas/DISK4/DISK4/enes/mmi727_project/myEnvironment/showAttendTell/lib/python3.8/site-packages/torch/nn/functional.py:3328: UserWarning: nn.functional.upsample is deprecated. Use nn.functional.interpolate instead.
+/home/enes/mmi727_project/myEnvironment/showAttendTell/lib/python3.8/site-packages/torch/nn/functional.py:3328: UserWarning: nn.functional.upsample is deprecated. Use nn.functional.interpolate instead.
   warnings.warn("nn.functional.upsample is deprecated. Use nn.functional.interpolate instead.")
-/home/deepuser/deepnas/DISK4/DISK4/enes/mmi727_project/myEnvironment/showAttendTell/lib/python3.8/site-packages/torch/nn/functional.py:3454: UserWarning: Default upsampling behavior when mode=bilinear is changed to align_corners=False since 0.4.0. Please specify align_corners=True if the old behavior is desired. See the documentation of nn.Upsample for details.
+/home/enes/mmi727_project/myEnvironment/showAttendTell/lib/python3.8/site-packages/torch/nn/functional.py:3454: UserWarning: Default upsampling behavior when mode=bilinear is changed to align_corners=False since 0.4.0. Please specify align_corners=True if the old behavior is desired. See the documentation of nn.Upsample for details.
   warnings.warn(
 Epoch: [0][0/8851]	Batch Time 3.843 (3.843)	Data Load Time 0.570 (0.570)	Loss 10.1118 (10.1118)	Top-5 Accuracy 0.000 (0.000)
 Epoch: [0][50/8851]	Batch Time 0.922 (0.980)	Data Load Time 0.000 (0.011)	Loss 7.1118 (7.9877)	Top-5 Accuracy 32.796 (29.046)
